@@ -517,6 +517,46 @@ func runAllTests() -> Int32 {
     vm.activeTool = .text
     if let canvas = pinPanel.canvasView {
         canvas.showInlineTextField(atNormalized: CGPoint(x: 0.30, y: 0.30), in: canvas.imageRectInView, initialText: "LiveColorText")
+        let openSettings = pinPanel.onOpenSettings
+        var settingsOpenCount = 0
+        pinPanel.onOpenSettings = { settingsOpenCount += 1 }
+        let originalTextPosition = vm.pendingTextNormalizedPos
+        func commaEvent(modifiers: NSEvent.ModifierFlags) -> NSEvent {
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: modifiers,
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: pinPanel.windowNumber, context: nil,
+                characters: ",", charactersIgnoringModifiers: ",",
+                isARepeat: false, keyCode: UInt16(kVK_ANSI_Comma)
+            )!
+        }
+        t.check(
+            pinPanel.firstResponder is NSTextView && vm.pendingTextNormalizedPos != nil,
+            "Settings shortcut regression starts with an active inline field editor"
+        )
+        let settingsEvent = commaEvent(modifiers: [.command])
+        let settingsHandled = pinPanel.performKeyEquivalent(with: settingsEvent)
+        t.check(
+            settingsHandled && settingsOpenCount == 1,
+            "Cmd+, opens settings through window key equivalents while the inline field editor is active"
+        )
+        tbPanel.keyDown(with: settingsEvent)
+        t.check(
+            settingsOpenCount == 2,
+            "Toolbar key forwarding opens settings even with pending inline text"
+        )
+        _ = pinPanel.performKeyEquivalent(with: commaEvent(modifiers: []))
+        _ = pinPanel.performKeyEquivalent(with: commaEvent(modifiers: [.command, .shift]))
+        t.check(
+            settingsOpenCount == 2,
+            "Plain comma and modified Cmd+comma do not trigger settings"
+        )
+        t.check(
+            vm.pendingTextNormalizedPos == originalTextPosition &&
+                canvas.textField?.stringValue == "LiveColorText" && vm.annotations.isEmpty,
+            "Routing the settings shortcut preserves pending text without committing or discarding it"
+        )
+        pinPanel.onOpenSettings = openSettings
         t.check(
             canvas.textField?.drawsBackground == false && canvas.textField?.backgroundColor == .clear,
             "Inline text field has transparent background by default (no gray box)"

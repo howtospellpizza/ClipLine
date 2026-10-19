@@ -307,6 +307,7 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
             defer: false
         )
         panel.viewModel = vm
+        panel.onOpenSettings = { [weak self] in self?.showShortcutSettings() }
         vm.hostingPanel = panel
 
         panel.isFloatingPanel = true

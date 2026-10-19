@@ -283,6 +283,7 @@ final class PinFloatingPanel: NSPanel {
     var viewModel: PinSessionViewModel?
     var canvasView: PinCanvasNSView?
     var onClosePanel: (() -> Void)?
+    var onOpenSettings: (() -> Void)?
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -291,7 +292,23 @@ final class PinFloatingPanel: NSPanel {
         onClosePanel?()
     }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if handleSettingsShortcut(event) { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    private func handleSettingsShortcut(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        guard modifiers == .command,
+              event.charactersIgnoringModifiers == "," || event.keyCode == 43,
+              let onOpenSettings else { return false }
+        onOpenSettings()
+        return true
+    }
+
     override func keyDown(with event: NSEvent) {
+        if handleSettingsShortcut(event) { return }
+
         guard let vm = viewModel else {
             super.keyDown(with: event)
             return
@@ -337,16 +354,6 @@ final class PinFloatingPanel: NSPanel {
         }
         if flags.contains(.command) && chars == "s" {
             vm.saveToFile()
-            return
-        }
-        if flags.contains(.command) && (chars == "," || event.keyCode == 43) {
-            for channel in NotificationChannels.settingsChannels {
-                DistributedNotificationCenter.default().postNotificationName(
-                    NSNotification.Name(channel),
-                    object: nil,
-                    deliverImmediately: true
-                )
-            }
             return
         }
         if chars == "o" {
