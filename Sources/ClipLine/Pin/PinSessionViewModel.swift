@@ -147,7 +147,11 @@ final class PinSessionViewModel: ObservableObject {
             return
         }
 
+        if let tbPanel = tbPanel as? PinToolbarPanel {
+            tbPanel.refreshToolbarRootView()
+        }
         if let contentView = tbPanel.contentView {
+            contentView.invalidateIntrinsicContentSize()
             contentView.layoutSubtreeIfNeeded()
             let fitting = contentView.fittingSize
             if fitting.width > 10 && fitting.height > 10 {
@@ -763,8 +767,7 @@ final class PinSessionViewModel: ObservableObject {
             return
         }
 
-        let targetPasteboard = ClotheslineManager.shared.pasteboardProvider()
-        let initialChangeCount = targetPasteboard.changeCount
+        let initialChangeCount = ClotheslineManager.shared.pasteboardProvider().changeCount
 
         isPerformingOCR = true
         showToast(L10n.toastOCRInProgress(andTranslate: andTranslate))
@@ -803,7 +806,7 @@ final class PinSessionViewModel: ObservableObject {
                     recognized,
                     andTranslate: andTranslate,
                     expectedChangeCount: initialChangeCount,
-                    pasteboard: targetPasteboard
+                    pasteboard: ClotheslineManager.shared.pasteboardProvider()
                 )
             }
         }

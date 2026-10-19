@@ -7,6 +7,10 @@ Capture screenshots, annotate them, and clip them to a floating clothesline at t
 
 [简体中文](README.zh-CN.md)
 
+<p align="center">
+  <img src="assets/demo.gif" alt="ClipLine Demo" width="760">
+</p>
+
 ```
    ═══════🪵══════════════🪵══════════════🪵═══════
        ┌──────┐       ┌──────┐       ┌──────┐

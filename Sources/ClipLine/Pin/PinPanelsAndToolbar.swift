@@ -257,8 +257,19 @@ struct PinToolbarView: View {
 final class PinToolbarPanel: NSPanel {
     weak var viewModel: PinSessionViewModel?
     var onEscape: (() -> Void)?
+    var onOpenSettings: (() -> Void)?
 
     override var canBecomeKey: Bool { true }
+
+    func refreshToolbarRootView() {
+        guard let vm = viewModel,
+              let hosting = contentView as? NSHostingView<PinToolbarView> else { return }
+        hosting.rootView = PinToolbarView(
+            vm: vm,
+            onOpenSettings: onOpenSettings,
+            onClose: { [weak self] in self?.onEscape?() }
+        )
+    }
 
     override func cancelOperation(_ sender: Any?) {
         onEscape?()

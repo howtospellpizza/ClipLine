@@ -354,6 +354,7 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
         }
         panel.onClosePanel = closeClosure
         tbPanel.onEscape = closeClosure
+        tbPanel.onOpenSettings = { [weak self] in self?.showShortcutSettings() }
 
         let tbView = PinToolbarView(
             vm: vm,
