@@ -361,10 +361,13 @@ final class ShortcutSettingsWindowController: NSWindowController, NSWindowDelega
 
     func show() {
         guard let window else { return }
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         if !window.isVisible { window.center() }
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 
     func windowWillClose(_ notification: Notification) {

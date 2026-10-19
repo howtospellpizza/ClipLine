@@ -5,6 +5,7 @@ import SwiftUI
 
 struct PinToolbarView: View {
     @ObservedObject var vm: PinSessionViewModel
+    var onOpenSettings: (() -> Void)? = nil
     var onClose: () -> Void
 
     private let palette: [Color] = [.red, .orange, .yellow, .green, .blue, .white]
@@ -217,6 +218,16 @@ struct PinToolbarView: View {
             .buttonStyle(.plain)
             .help(L10n.toolbarCopyTooltip)
 
+            Button(action: { onOpenSettings?() }) {
+                Image(systemName: "keyboard")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(L10n.shortcutMenuSettings)
+
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 11.5, weight: .bold))
@@ -326,6 +337,16 @@ final class PinFloatingPanel: NSPanel {
         }
         if flags.contains(.command) && chars == "s" {
             vm.saveToFile()
+            return
+        }
+        if flags.contains(.command) && (chars == "," || event.keyCode == 43) {
+            for channel in NotificationChannels.settingsChannels {
+                DistributedNotificationCenter.default().postNotificationName(
+                    NSNotification.Name(channel),
+                    object: nil,
+                    deliverImmediately: true
+                )
+            }
             return
         }
         if chars == "o" {

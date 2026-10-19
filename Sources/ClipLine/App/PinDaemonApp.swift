@@ -354,7 +354,11 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
         panel.onClosePanel = closeClosure
         tbPanel.onEscape = closeClosure
 
-        let tbView = PinToolbarView(vm: vm, onClose: closeClosure)
+        let tbView = PinToolbarView(
+            vm: vm,
+            onOpenSettings: { [weak self] in self?.showShortcutSettings() },
+            onClose: closeClosure
+        )
         let tbHosting = NSHostingView(rootView: tbView)
         tbPanel.contentView = tbHosting
 

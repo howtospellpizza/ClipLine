@@ -29,7 +29,7 @@ nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
 
 > **Note**: This starts `clipline` in the background for the current session. It does not automatically register a login item or guarantee launch on system startup.
 
-Open the ClipLine menu bar menu → **Keyboard Shortcuts** to view or edit all global shortcuts. Factory defaults: `⌃X` captures a region, `⌘⇧X` is the secondary capture shortcut, and `⌃⌘V` pins the clipboard image.
+Click the keyboard icon (`⌨️`) on any pin toolbar (or press `⌘,` on a pin window, or run `~/.local/bin/clipline --settings`) to view or edit all global shortcuts. Factory defaults: `⌃X` captures a region, `⌘⇧X` is the secondary capture shortcut, and `⌃⌘V` pins the clipboard image.
 
 ### Update & Reinstall
 

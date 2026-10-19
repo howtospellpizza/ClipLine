@@ -394,6 +394,24 @@ struct ClotheslineBarView: View {
 
                             Text("·").foregroundColor(.secondary)
 
+                            Button(action: {
+                                for channel in NotificationChannels.settingsChannels {
+                                    DistributedNotificationCenter.default().postNotificationName(
+                                        NSNotification.Name(channel),
+                                        object: nil,
+                                        deliverImmediately: true
+                                    )
+                                }
+                            }) {
+                                Image(systemName: "keyboard")
+                                    .font(.system(size: 10.5, weight: .bold))
+                                    .foregroundColor(.primary.opacity(0.85))
+                            }
+                            .buttonStyle(.plain)
+                            .help(L10n.shortcutMenuSettings)
+
+                            Text("·").foregroundColor(.secondary)
+
                             Button(action: { manager.clearAll() }) {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 10, weight: .bold))
