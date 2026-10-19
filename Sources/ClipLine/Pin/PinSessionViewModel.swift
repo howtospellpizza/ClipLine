@@ -1,0 +1,797 @@
+import AppKit
+import CoreGraphics
+import Foundation
+import SwiftUI
+import UniformTypeIdentifiers
+import Vision
+
+// MARK: - Pin Window ViewModel (Dual-Panel Architecture: Image Canvas Panel + Detached Toolbar Panel)
+
+@MainActor
+final class PinSessionViewModel: ObservableObject {
+    enum ResizeHandle: CaseIterable {
+        case topLeft, topCenter, topRight
+        case middleLeft, middleRight
+        case bottomLeft, bottomCenter, bottomRight
+
+        var cursor: NSCursor {
+            switch self {
+            case .topCenter, .bottomCenter:
+                return DirectionalCursor.northSouth
+            case .middleLeft, .middleRight:
+                return DirectionalCursor.eastWest
+            case .topLeft, .bottomRight:
+                return DirectionalCursor.northWestSouthEast
+            case .topRight, .bottomLeft:
+                return DirectionalCursor.northEastSouthWest
+            }
+        }
+    }
+
+    let id = UUID()
+    @Published var baseImage: NSImage
+    @Published var pixelatedBaseImage: NSImage?
+    @Published var baseSize: NSSize
+
+    let fullScreenCGImage: CGImage?
+    let fullScreenFrame: NSRect?
+    let captureScaleFactor: CGFloat
+    @Published var cropScreenRect: NSRect?
+    @Published var hasMovedWindow: Bool = false
+
+    @Published var annotations: [PinAnnotation] = []
+    @Published var currentDragPoints: [CGPoint] = []
+    @Published var activeTool: PinAnnotation.Tool? = nil {
+        didSet {
+            if activeTool == .mosaic && pixelatedBaseImage == nil {
+                regeneratePixelatedImage()
+            }
+            updateToolbarPanelPosition()
+            hostingPanel?.canvasView?.window?.invalidateCursorRects(for: hostingPanel!.canvasView!)
+        }
+    }
+    @Published var selectedColor: Color = .red {
+        didSet {
+            hostingPanel?.canvasView?.applyStyleChangeToSelectionOrField(updateColor: true, updatePreset: false, updateBackground: false)
+        }
+    }
+    @Published var strokePreset: StrokePreset = .medium {
+        didSet {
+            hostingPanel?.canvasView?.applyStyleChangeToSelectionOrField(updateColor: false, updatePreset: true, updateBackground: false)
+        }
+    }
+    @Published var textBackgroundStyle: TextBackgroundStyle = .transparent {
+        didSet {
+            hostingPanel?.canvasView?.applyStyleChangeToSelectionOrField(updateColor: false, updatePreset: false, updateBackground: true)
+            updateToolbarPanelPosition()
+        }
+    }
+    @Published var selectedTextAnnotationID: UUID? = nil
+    @Published var scale: CGFloat = 1.0
+    @Published var windowOpacity: Double = 1.0
+    @Published var showToolbar: Bool = true {
+        didSet {
+            updateToolbarPanelPosition()
+        }
+    }
+    @Published var toastMessage: String? = nil
+    @Published var isPerformingOCR: Bool = false
+    @Published var isClosed: Bool = false
+    var activeOCRTask: Task<Void, Never>? = nil
+
+    // Option to force pixelation failure in tests to verify fail-closed solid redaction block
+    var forceMosaicFallbackForTesting: Bool = false
+    @Published var pendingTextNormalizedPos: CGPoint? = nil
+    @Published var pendingTextString: String = ""
+    var editingExistingTextAnnotationID: UUID? = nil
+    var editingOriginalAnnotationSnapshot: PinAnnotation? = nil
+
+    weak var hostingPanel: PinFloatingPanel?
+    weak var toolbarPanel: NSPanel?
+
+    /// Exact margin around the image inside `hostingPanel` so 8 resize handles sit comfortably inside the window
+    static let canvasMargin: CGFloat = 16
+
+    var currentToolLineWidth: CGFloat {
+        guard let tool = activeTool else { return strokePreset.strokeLineWidth }
+        switch tool {
+        case .mosaic:
+            return strokePreset.mosaicBrushWidth
+        case .text:
+            return strokePreset.textFontSize
+        case .rect, .arrow, .pen:
+            return strokePreset.strokeLineWidth
+        }
+    }
+
+    init(
+        image: NSImage,
+        fullScreenCGImage: CGImage? = nil,
+        fullScreenFrame: NSRect? = nil,
+        captureScaleFactor: CGFloat = 2.0,
+        cropScreenRect: NSRect? = nil
+    ) {
+        self.baseImage = image
+        self.baseSize = image.size
+        self.fullScreenCGImage = fullScreenCGImage
+        self.fullScreenFrame = fullScreenFrame
+        self.captureScaleFactor = captureScaleFactor
+        self.cropScreenRect = cropScreenRect
+        self.pixelatedBaseImage = nil
+    }
+
+    func regeneratePixelatedImage() {
+        self.pixelatedBaseImage = MosaicRenderer.createPixelatedImage(from: baseImage)
+    }
+
+    var canAdjustCrop: Bool {
+        fullScreenCGImage != nil && fullScreenFrame != nil && cropScreenRect != nil && !hasMovedWindow && scale == 1.0 && annotations.isEmpty
+    }
+
+    /// Computes the exact frame of `hostingPanel` for a given `imageScreenRect`.
+    /// Notice: NO `minPanelWidth`! The image panel is ALWAYS `image.width + 32` by `image.height + 32`!
+    static func panelFrameForImageScreenRect(_ imageScreenRect: NSRect) -> NSRect {
+        NSRect(
+            x: round(imageScreenRect.minX - canvasMargin),
+            y: round(imageScreenRect.minY - canvasMargin),
+            width: round(imageScreenRect.width + canvasMargin * 2),
+            height: round(imageScreenRect.height + canvasMargin * 2)
+        )
+    }
+
+    /// Positions the detached toolbar panel cleanly below (or above if near screen bottom) the image panel.
+    func updateToolbarPanelPosition() {
+        guard let imgPanel = hostingPanel, let tbPanel = toolbarPanel else { return }
+        if !showToolbar || !imgPanel.isVisible {
+            tbPanel.orderOut(nil)
+            return
+        }
+
+        if let contentView = tbPanel.contentView {
+            contentView.layoutSubtreeIfNeeded()
+            let fitting = contentView.fittingSize
+            if fitting.width > 10 && fitting.height > 10 {
+                tbPanel.setContentSize(fitting)
+            }
+        }
+
+        let imgFrame = imgPanel.frame
+        // Actual image screen rect inside imgPanel
+        let imageMinX = imgFrame.minX + Self.canvasMargin
+        let imageMinY = imgFrame.minY + Self.canvasMargin
+        let imageMaxY = imgFrame.maxY - Self.canvasMargin
+
+        let tbSize = tbPanel.frame.size
+        let screen = imgPanel.screen ?? NSScreen.main ?? NSScreen.screens.first
+        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+
+        // Align toolbar left with image left, clamped to screen visible bounds
+        var tbX = round(imageMinX)
+        if tbX + tbSize.width > visible.maxX - 8 {
+            tbX = round(visible.maxX - tbSize.width - 8)
+        }
+        if tbX < visible.minX + 8 {
+            tbX = round(visible.minX + 8)
+        }
+
+        // Place toolbar 12pt below the bottom border of the image (leaving plenty of room for bottom handles!)
+        var tbY = round(imageMinY - tbSize.height - 12)
+        if tbY < visible.minY + 6 {
+            // If image is at the very bottom of the screen, place toolbar 12pt above the top border of the image
+            tbY = round(imageMaxY + 12)
+        }
+
+        tbPanel.setFrameOrigin(NSPoint(x: tbX, y: tbY))
+        if !tbPanel.isVisible {
+            tbPanel.orderFrontRegardless()
+        }
+    }
+
+    func applyResize(handle: ResizeHandle, startMouse: NSPoint, startCropRect: NSRect, currentMouse: NSPoint) {
+        guard let cg = fullScreenCGImage,
+              let screenFrame = fullScreenFrame,
+              let panel = hostingPanel
+        else { return }
+
+        let dx = round(currentMouse.x - startMouse.x)
+        let dy = round(currentMouse.y - startMouse.y)
+
+        var newMinX = startCropRect.minX
+        var newMaxX = startCropRect.maxX
+        var newMinY = startCropRect.minY
+        var newMaxY = startCropRect.maxY
+
+        let minCropSize: CGFloat = 24.0
+        switch handle {
+        case .topLeft:
+            newMinX = max(screenFrame.minX, min(startCropRect.minX + dx, startCropRect.maxX - minCropSize))
+            newMaxY = min(screenFrame.maxY, max(startCropRect.maxY + dy, startCropRect.minY + minCropSize))
+        case .topCenter:
+            newMaxY = min(screenFrame.maxY, max(startCropRect.maxY + dy, startCropRect.minY + minCropSize))
+        case .topRight:
+            newMaxX = min(screenFrame.maxX, max(startCropRect.maxX + dx, startCropRect.minX + minCropSize))
+            newMaxY = min(screenFrame.maxY, max(startCropRect.maxY + dy, startCropRect.minY + minCropSize))
+        case .middleLeft:
+            newMinX = max(screenFrame.minX, min(startCropRect.minX + dx, startCropRect.maxX - minCropSize))
+        case .middleRight:
+            newMaxX = min(screenFrame.maxX, max(startCropRect.maxX + dx, startCropRect.minX + minCropSize))
+        case .bottomLeft:
+            newMinX = max(screenFrame.minX, min(startCropRect.minX + dx, startCropRect.maxX - minCropSize))
+            newMinY = max(screenFrame.minY, min(startCropRect.minY + dy, startCropRect.maxY - minCropSize))
+        case .bottomCenter:
+            newMinY = max(screenFrame.minY, min(startCropRect.minY + dy, startCropRect.maxY - minCropSize))
+        case .bottomRight:
+            newMaxX = min(screenFrame.maxX, max(startCropRect.maxX + dx, startCropRect.minX + minCropSize))
+            newMinY = max(screenFrame.minY, min(startCropRect.minY + dy, startCropRect.maxY - minCropSize))
+        }
+
+        let rect = NSRect(x: newMinX, y: newMinY, width: newMaxX - newMinX, height: newMaxY - newMinY)
+        if rect == self.cropScreenRect { return }
+
+        let localRect = NSRect(
+            x: rect.origin.x - screenFrame.origin.x,
+            y: rect.origin.y - screenFrame.origin.y,
+            width: rect.width,
+            height: rect.height
+        )
+
+        guard let reCropped = PixPinSelectionView.cropImage(
+            cgImage: cg,
+            viewHeight: screenFrame.height,
+            scaleFactor: captureScaleFactor,
+            rect: localRect
+        ) else { return }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        self.cropScreenRect = rect
+        self.baseImage = reCropped
+        self.baseSize = reCropped.size
+        let panelFrame = Self.panelFrameForImageScreenRect(rect)
+        panel.setFrame(panelFrame, display: true, animate: false)
+        panel.canvasView?.needsDisplay = true
+        updateToolbarPanelPosition()
+        CATransaction.commit()
+    }
+
+    func finishResize() {
+        if activeTool == .mosaic || pixelatedBaseImage != nil {
+            regeneratePixelatedImage()
+        }
+        if let cv = hostingPanel?.canvasView {
+            hostingPanel?.invalidateCursorRects(for: cv)
+        }
+    }
+
+    func showToast(_ msg: String) {
+        toastMessage = msg
+        hostingPanel?.canvasView?.needsDisplay = true
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if self.toastMessage == msg {
+                self.toastMessage = nil
+                self.hostingPanel?.canvasView?.needsDisplay = true
+            }
+        }
+    }
+
+    func undo() {
+        if !annotations.isEmpty {
+            _ = annotations.popLast()
+            hostingPanel?.canvasView?.needsDisplay = true
+        }
+    }
+
+    func cancelPendingTextEditing() {
+        let editID = editingExistingTextAnnotationID
+        let snapshot = editingOriginalAnnotationSnapshot
+        editingExistingTextAnnotationID = nil
+        editingOriginalAnnotationSnapshot = nil
+        pendingTextNormalizedPos = nil
+        pendingTextString = ""
+        if let tf = hostingPanel?.canvasView?.textField {
+            tf.delegate = nil
+            hostingPanel?.canvasView?.clearTextFieldReference()
+            tf.removeFromSuperview()
+        }
+        if let editID = editID {
+            if let snapshot = snapshot,
+               let idx = annotations.firstIndex(where: { $0.id == editID && $0.tool == .text }) {
+                annotations[idx] = snapshot
+            }
+            selectedTextAnnotationID = editID
+        }
+        if let cv = hostingPanel?.canvasView {
+            cv.window?.invalidateCursorRects(for: cv)
+            cv.needsDisplay = true
+        }
+    }
+
+    func commitPendingText() {
+        if let tf = hostingPanel?.canvasView?.textField {
+            pendingTextString = tf.stringValue
+            tf.delegate = nil
+            hostingPanel?.canvasView?.clearTextFieldReference()
+            tf.removeFromSuperview()
+        }
+        guard let pos = pendingTextNormalizedPos else {
+            editingExistingTextAnnotationID = nil
+            editingOriginalAnnotationSnapshot = nil
+            return
+        }
+        let trimmed = pendingTextString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let editID = editingExistingTextAnnotationID,
+           let idx = annotations.firstIndex(where: { $0.id == editID && $0.tool == .text }) {
+            if trimmed.isEmpty {
+                annotations.remove(at: idx)
+                selectedTextAnnotationID = nil
+            } else {
+                annotations[idx].color = NSColor(selectedColor)
+                annotations[idx].lineWidth = strokePreset.textFontSize
+                annotations[idx].points = [pos]
+                annotations[idx].text = trimmed
+                annotations[idx].textBackgroundStyle = textBackgroundStyle
+                selectedTextAnnotationID = editID
+            }
+        } else if !trimmed.isEmpty {
+            let newItem = PinAnnotation(
+                tool: .text,
+                color: NSColor(selectedColor),
+                lineWidth: strokePreset.textFontSize,
+                points: [pos],
+                text: trimmed,
+                textBackgroundStyle: textBackgroundStyle
+            )
+            annotations.append(newItem)
+            selectedTextAnnotationID = newItem.id
+        }
+        editingExistingTextAnnotationID = nil
+        editingOriginalAnnotationSnapshot = nil
+        pendingTextNormalizedPos = nil
+        pendingTextString = ""
+        if let cv = hostingPanel?.canvasView {
+            cv.window?.invalidateCursorRects(for: cv)
+            cv.needsDisplay = true
+        }
+    }
+
+    func renderCompositeImage() -> NSImage? {
+        let targetSize = baseSize
+        guard targetSize.width >= 1, targetSize.height >= 1 else { return nil }
+        let result = NSImage(size: targetSize)
+        result.lockFocus()
+        guard let ctx = NSGraphicsContext.current?.cgContext else {
+            result.unlockFocus()
+            return nil
+        }
+
+        baseImage.draw(in: NSRect(origin: .zero, size: targetSize))
+
+        ctx.saveGState()
+        ctx.translateBy(x: 0, y: targetSize.height)
+        ctx.scaleBy(x: 1.0, y: -1.0)
+
+        for item in annotations {
+            drawAnnotationInCGContext(item, ctx: ctx, size: targetSize)
+        }
+
+        ctx.restoreGState()
+        result.unlockFocus()
+        return result
+    }
+
+    func drawAnnotationInCGContext(_ item: PinAnnotation, ctx: CGContext, size: NSSize, scaleMultiplier: CGFloat = 1.0) {
+        guard !item.points.isEmpty else { return }
+        let pts = item.points.map { CGPoint(x: $0.x * size.width, y: $0.y * size.height) }
+        let lw = item.lineWidth * scaleMultiplier
+
+        ctx.saveGState()
+        ctx.setStrokeColor(item.color.cgColor)
+        ctx.setFillColor(item.color.cgColor)
+        ctx.setLineWidth(lw)
+        ctx.setLineCap(.round)
+        ctx.setLineJoin(.round)
+
+        switch item.tool {
+        case .rect:
+            guard pts.count >= 2 else { break }
+            let rect = CGRect(
+                x: min(pts[0].x, pts.last!.x),
+                y: min(pts[0].y, pts.last!.y),
+                width: abs(pts.last!.x - pts[0].x),
+                height: abs(pts.last!.y - pts[0].y)
+            )
+            ctx.stroke(rect)
+
+        case .arrow:
+            guard pts.count >= 2 else { break }
+            let start = pts[0]
+            let end = pts.last!
+            ctx.move(to: start)
+            ctx.addLine(to: end)
+            ctx.strokePath()
+
+            let angle = atan2(end.y - start.y, end.x - start.x)
+            let headLength: CGFloat = max(12.0, item.lineWidth * 3.4) * scaleMultiplier
+            let arrowAngle: CGFloat = .pi / 6
+            let p1 = CGPoint(
+                x: end.x - headLength * cos(angle - arrowAngle),
+                y: end.y - headLength * sin(angle - arrowAngle)
+            )
+            let p2 = CGPoint(
+                x: end.x - headLength * cos(angle + arrowAngle),
+                y: end.y - headLength * sin(angle + arrowAngle)
+            )
+            ctx.move(to: end)
+            ctx.addLine(to: p1)
+            ctx.addLine(to: p2)
+            ctx.closePath()
+            ctx.fillPath()
+
+        case .pen:
+            guard pts.count >= 2 else { break }
+            ctx.move(to: pts[0])
+            for p in pts.dropFirst() {
+                ctx.addLine(to: p)
+            }
+            ctx.strokePath()
+
+        case .mosaic:
+            guard pts.count >= 2 else { break }
+            let strokePath = CGMutablePath()
+            strokePath.move(to: pts[0])
+            for p in pts.dropFirst() {
+                strokePath.addLine(to: p)
+            }
+            let strokedMaskPath = strokePath.copy(
+                strokingWithWidth: lw,
+                lineCap: .round,
+                lineJoin: .round,
+                miterLimit: 10
+            )
+
+            ctx.saveGState()
+            ctx.addPath(strokedMaskPath)
+            ctx.clip()
+
+            let pixelated = forceMosaicFallbackForTesting ? nil : (pixelatedBaseImage ?? MosaicRenderer.createPixelatedImage(from: baseImage))
+            if let pixImg = pixelated,
+               let tiff = pixImg.tiffRepresentation,
+               let bmp = NSBitmapImageRep(data: tiff),
+               let cgPix = bmp.cgImage {
+                ctx.translateBy(x: 0, y: size.height)
+                ctx.scaleBy(x: 1.0, y: -1.0)
+                ctx.interpolationQuality = .none
+                ctx.draw(cgPix, in: CGRect(origin: .zero, size: size))
+            } else {
+                // Fail-closed redaction: if pixelation cannot be produced, paint opaque dark blocks rather than leaving underlying pixels exposed
+                ctx.setFillColor(NSColor(calibratedWhite: 0.12, alpha: 1.0).cgColor)
+                ctx.fill(CGRect(origin: .zero, size: size))
+            }
+            ctx.restoreGState()
+
+        case .text:
+            let pos = pts[0]
+            let fontSize = max(12.0, item.lineWidth) * scaleMultiplier
+            let font = NSFont.systemFont(ofSize: fontSize, weight: .bold)
+            var attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: item.color
+            ]
+            if item.textBackgroundStyle == .transparent {
+                let textShadow = NSShadow()
+                textShadow.shadowColor = NSColor.black.withAlphaComponent(0.55)
+                textShadow.shadowBlurRadius = 2.0
+                textShadow.shadowOffset = NSSize(width: 0, height: -1)
+                attrs[.shadow] = textShadow
+            }
+            let textSize = (item.text as NSString).size(withAttributes: attrs)
+            ctx.saveGState()
+            // pos is the TOP-LEFT corner of the text glyph box in top-down coordinates.
+            // Flipping Y at (pos.x, pos.y) puts y=0 at pos.y and y<0 downward (towards bottom of image).
+            // So the text box occupies x: [0, textSize.width], y: [-textSize.height, 0].
+            ctx.translateBy(x: pos.x, y: pos.y)
+            ctx.scaleBy(x: 1.0, y: -1.0)
+            if let bgFill = item.textBackgroundStyle.fillNSColor {
+                let padX: CGFloat = 8.0 * scaleMultiplier
+                let padY: CGFloat = 4.0 * scaleMultiplier
+                let pillRect = CGRect(
+                    x: -padX,
+                    y: -textSize.height - padY,
+                    width: textSize.width + padX * 2,
+                    height: textSize.height + padY * 2
+                )
+                let radius: CGFloat = 6.0 * scaleMultiplier
+                let path = CGPath(roundedRect: pillRect, cornerWidth: radius, cornerHeight: radius, transform: nil)
+                ctx.saveGState()
+                ctx.setShadow(offset: CGSize(width: 0, height: -1.5), blur: 3.5, color: NSColor.black.withAlphaComponent(0.28).cgColor)
+                ctx.addPath(path)
+                ctx.setFillColor(bgFill.cgColor)
+                ctx.fillPath()
+                ctx.restoreGState()
+            }
+            (item.text as NSString).draw(at: CGPoint(x: 0, y: -textSize.height), withAttributes: attrs)
+            ctx.restoreGState()
+        }
+        ctx.restoreGState()
+    }
+
+    @discardableResult
+    func copyToClipboard() -> Bool {
+        commitPendingText()
+        guard let img = renderCompositeImage() else {
+            showToast("图像合成失败，已拒绝导出未合成原图")
+            return false
+        }
+        let pboard = ClotheslineManager.shared.pasteboardProvider()
+        guard ClipboardHelper.copyImages([img], pasteboard: pboard, tempDir: ClotheslineManager.shared.tempDirOverride) else {
+            showToast("复制失败，未能写入剪贴板")
+            return false
+        }
+        showToast("已复制到剪贴板")
+        return true
+    }
+
+    func clipToClothesline() {
+        ClotheslineManager.shared.clipToLine(vm: self)
+    }
+
+    func saveToFile() {
+        commitPendingText()
+        guard let img = renderCompositeImage() else {
+            showToast("图像合成失败，无法保存")
+            return
+        }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd_HH.mm.ss"
+        panel.nameFieldStringValue = "ClipLine_\(formatter.string(from: Date())).png"
+        panel.level = .screenSaver
+
+        if panel.runModal() == .OK, let url = panel.url {
+            if let png = ClipboardHelper.pngData(from: img),
+               (try? png.write(to: url, options: .atomic)) != nil {
+                showToast("已保存图片")
+            } else {
+                showToast("保存失败，请检查文件权限")
+            }
+        }
+    }
+
+    private static var strictQueryValueAllowed: CharacterSet = {
+        var set = CharacterSet.urlQueryAllowed
+        set.remove(charactersIn: "&=+#/?;")
+        return set
+    }()
+
+    static func encodeQueryValue(_ text: String) -> String? {
+        text.addingPercentEncoding(withAllowedCharacters: strictQueryValueAllowed)
+    }
+
+    static func buildCustomTranslationURL(template: String, text: String) -> URL? {
+        let trimmed = template.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.contains("{text}"), let encoded = encodeQueryValue(text) else { return nil }
+        let urlStr = trimmed.replacingOccurrences(of: "{text}", with: encoded)
+        guard let url = URL(string: urlStr),
+              let scheme = url.scheme?.lowercased() else { return nil }
+        if scheme == "https" {
+            guard let host = url.host, !host.isEmpty else { return nil }
+            return url
+        }
+        if scheme == "http",
+           let host = url.host?.lowercased(),
+           host == "localhost" || host == "127.0.0.1" || host == "::1" {
+            return url
+        }
+        return nil
+    }
+
+    static func buildGoogleTranslateURL(text: String, targetLang: String = "zh-CN") -> URL? {
+        var components = URLComponents(string: "https://translate.google.com/")
+        components?.queryItems = [
+            URLQueryItem(name: "sl", value: "auto"),
+            URLQueryItem(name: "tl", value: targetLang),
+            URLQueryItem(name: "text", value: text)
+        ]
+        return components?.url
+    }
+
+    private static var configuredDaemonName: String {
+        let envName = ProcessInfo.processInfo.environment["CLIP_LINE_TRANSLATE_DAEMON"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return envName.isEmpty ? "fy-daemon" : envName
+    }
+
+    private static func isTranslationDaemonRunning() -> Bool {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        proc.arguments = ["-x", configuredDaemonName]
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            return proc.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
+    static func hasStoredWebTranslateConsent(for destinationHost: String, defaults: UserDefaults = .standard) -> Bool {
+        let key = "ClipLineAllowWebTranslateFallback_\(destinationHost)"
+        if defaults.bool(forKey: key) {
+            return true
+        }
+        // Legacy global key is ONLY honored for the default Google Translate destination, never for custom hosts
+        if destinationHost == "translate.google.com" && defaults.bool(forKey: "ClipLineAllowWebTranslateFallback") {
+            return true
+        }
+        return false
+    }
+
+    private static func confirmWebTranslateIfNeeded(destinationHost: String = "translate.google.com") -> Bool {
+        if hasStoredWebTranslateConsent(for: destinationHost) {
+            return true
+        }
+        let key = "ClipLineAllowWebTranslateFallback_\(destinationHost)"
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "即将使用外部翻译服务打开识别文本"
+        alert.informativeText = "当前未检测到本地翻译守护进程。是否允许将 OCR 识别到的文字通过默认浏览器发送到 \(destinationHost)？（后续将记住您的选择）"
+        alert.addButton(withTitle: "允许并打开网页翻译")
+        alert.addButton(withTitle: "仅复制文本，不打开网页")
+        if alert.runModal() == .alertFirstButtonReturn {
+            UserDefaults.standard.set(true, forKey: key)
+            return true
+        }
+        return false
+    }
+
+    private func triggerSmartTranslation(for text: String, pasteboard: NSPasteboard) {
+        if Self.isTranslationDaemonRunning() {
+            showToast("已识别并唤起翻译")
+            for channel in NotificationChannels.translateChannels {
+                DistributedNotificationCenter.default().postNotificationName(
+                    NSNotification.Name(channel),
+                    object: nil,
+                    userInfo: ["text": text],
+                    deliverImmediately: true
+                )
+            }
+            return
+        }
+
+        // Fallback 1: Custom URL template via CLIP_LINE_TRANSLATE_URL (only HTTPS or localhost HTTP)
+        let customTemplate = ProcessInfo.processInfo.environment["CLIP_LINE_TRANSLATE_URL"]
+            ?? UserDefaults.standard.string(forKey: "TranslateURLTemplate")
+        if let template = customTemplate,
+           let url = Self.buildCustomTranslationURL(template: template, text: text) {
+            let host = url.host ?? "custom-translate"
+            let isLocal = (host == "localhost" || host == "127.0.0.1" || host == "::1")
+            if !isLocal {
+                guard Self.confirmWebTranslateIfNeeded(destinationHost: host) else {
+                    showToast("OCR 文本已复制（已取消外部网页翻译）")
+                    return
+                }
+            }
+            showToast("已复制文本并打开自定义翻译")
+            NSWorkspace.shared.open(url)
+            return
+        }
+
+        // Fallback 2: macOS system Translation service if registered, else Google Translate web fallback (with first-time consent)
+        if NSPerformService("Translate", pasteboard) {
+            showToast("已唤起 macOS 系统翻译")
+            return
+        }
+
+        guard Self.confirmWebTranslateIfNeeded(destinationHost: "translate.google.com") else {
+            showToast("OCR 文本已复制（已取消网页翻译）")
+            return
+        }
+
+        if let url = Self.buildGoogleTranslateURL(text: text) {
+            showToast("已复制文本并打开网页翻译")
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func cancelActiveOCR() {
+        activeOCRTask?.cancel()
+        activeOCRTask = nil
+        isPerformingOCR = false
+    }
+
+    func applyOCRResult(_ recognized: String, andTranslate: Bool, expectedChangeCount: Int, pasteboard: NSPasteboard) {
+        guard !isClosed else { return }
+        let trimmed = recognized.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            showToast("未识别到文字")
+            return
+        }
+        guard pasteboard.changeCount == expectedChangeCount else {
+            showToast("剪贴板已更新，未覆盖新内容")
+            return
+        }
+        pasteboard.clearContents()
+        pasteboard.setString(trimmed, forType: .string)
+        if andTranslate {
+            triggerSmartTranslation(for: trimmed, pasteboard: pasteboard)
+        } else {
+            showToast("OCR 文本已复制")
+        }
+    }
+
+    func runOCR(andTranslate: Bool = false) {
+        guard !isPerformingOCR, !isClosed else { return }
+        commitPendingText()
+        guard let composite = renderCompositeImage(),
+              let tiff = composite.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let cgImage = bitmap.cgImage
+        else {
+            showToast("无法读取图像")
+            return
+        }
+
+        let targetPasteboard = ClotheslineManager.shared.pasteboardProvider()
+        let initialChangeCount = targetPasteboard.changeCount
+
+        isPerformingOCR = true
+        showToast(andTranslate ? "正在识别并翻译..." : "正在识别文字...")
+
+        activeOCRTask = Task.detached { [weak self] in
+            if Task.isCancelled { return }
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.recognitionLanguages = ["zh-Hans", "zh-Hant", "en-US"]
+            request.usesLanguageCorrection = true
+
+            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+            do {
+                try handler.perform([request])
+            } catch {
+                await MainActor.run { [weak self] in
+                    guard let self = self, !self.isClosed else { return }
+                    self.isPerformingOCR = false
+                    self.activeOCRTask = nil
+                    self.showToast("OCR 识别出错")
+                }
+                return
+            }
+
+            if Task.isCancelled { return }
+            let recognized = (request.results ?? [])
+                .compactMap { $0.topCandidates(1).first?.string }
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            await MainActor.run { [weak self] in
+                guard let self = self, !self.isClosed, !Task.isCancelled else { return }
+                self.isPerformingOCR = false
+                self.activeOCRTask = nil
+                self.applyOCRResult(
+                    recognized,
+                    andTranslate: andTranslate,
+                    expectedChangeCount: initialChangeCount,
+                    pasteboard: targetPasteboard
+                )
+            }
+        }
+    }
+
+    func updateZoom(delta: CGFloat) {
+        let newScale = max(0.35, min(3.0, scale + delta))
+        scale = newScale
+        guard let panel = hostingPanel else { return }
+        let newW = round(baseSize.width * newScale + Self.canvasMargin * 2)
+        let newH = round(baseSize.height * newScale + Self.canvasMargin * 2)
+        var frame = panel.frame
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        frame.size = NSSize(width: newW, height: newH)
+        frame.origin = CGPoint(x: round(center.x - frame.width / 2), y: round(center.y - frame.height / 2))
+        panel.setFrame(frame, display: true)
+        panel.canvasView?.needsDisplay = true
+        updateToolbarPanelPosition()
+    }
+}

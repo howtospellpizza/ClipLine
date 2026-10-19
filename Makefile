@@ -1,6 +1,6 @@
 BINARY_NAME = clipline
 INSTALL_DIR = $(HOME)/.local/bin
-SRC = Sources/ClipLine/main.swift
+SRC = $(shell find Sources/ClipLine -name '*.swift' | sort)
 TEST_SRC = Tests/ClipLineTests.swift
 
 .PHONY: all build test install clean
