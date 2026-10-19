@@ -31,7 +31,7 @@ final class ClotheslineManager: ObservableObject {
     func clipToLine(vm: PinSessionViewModel) {
         vm.commitPendingText()
         guard let rendered = vm.renderCompositeImage() else {
-            vm.showToast("图像合成失败，已拒绝导出")
+            vm.showToast(L10n.toastRenderFailedRefusedExport)
             return
         }
         vm.hostingPanel?.orderOut(nil)
@@ -57,7 +57,7 @@ final class ClotheslineManager: ObservableObject {
 
         syncSelectedToClipboard(silent: true)
         updateDockVisibility()
-        showToast("已夹上晾衣绳（当前选中 \(selectedItems.count) 张）")
+        showToast(L10n.toastClippedToLine(selectedCount: selectedItems.count))
     }
 
     func restoreToCanvas(_ item: ClippedPinItem) {
@@ -87,7 +87,7 @@ final class ClotheslineManager: ObservableObject {
         if newState {
             syncSelectedToClipboard(silent: false)
         } else {
-            showToast("已取消全选")
+            showToast(L10n.toastDeselectedAll)
         }
     }
 
@@ -95,20 +95,20 @@ final class ClotheslineManager: ObservableObject {
         let chosen = selectedItems
         guard !chosen.isEmpty else {
             if !silent {
-                showToast("请先勾选要复制的照片")
+                showToast(L10n.toastSelectPhotosToCopy)
             }
             return
         }
         let ok = ClipboardHelper.copyImages(chosen.map(\.compositeImage), pasteboard: pasteboardProvider(), tempDir: tempDirOverride)
         if !silent {
-            showToast(ok ? "已复制 \(chosen.count) 张照片到剪贴板" : "复制失败，未能写入剪贴板")
+            showToast(ok ? L10n.toastCopiedPhotos(chosen.count) : L10n.toastCopyFailed)
         }
     }
 
     func saveSelectedToFolder() {
         let chosen = selectedItems
         guard !chosen.isEmpty else {
-            showToast("请先勾选要保存的照片")
+            showToast(L10n.toastSelectPhotosToSave)
             return
         }
 
@@ -121,7 +121,7 @@ final class ClotheslineManager: ObservableObject {
         openPanel.canChooseFiles = false
         openPanel.canChooseDirectories = true
         openPanel.canCreateDirectories = true
-        openPanel.prompt = "保存这 \(chosen.count) 张图片"
+        openPanel.prompt = L10n.clotheslineSaveFolderPrompt(chosen.count)
         openPanel.level = .screenSaver
 
         if openPanel.runModal() == .OK, let dirURL = openPanel.url {
@@ -138,11 +138,11 @@ final class ClotheslineManager: ObservableObject {
                 }
             }
             if savedCount == chosen.count {
-                showToast("已保存 \(savedCount) 张图片")
+                showToast(L10n.toastSavedMultipleImages(savedCount))
             } else if savedCount > 0 {
-                showToast("已保存 \(savedCount)/\(chosen.count) 张图片（部分写入失败）")
+                showToast(L10n.toastSavedPartialImages(saved: savedCount, total: chosen.count))
             } else {
-                showToast("保存失败，请检查目录权限")
+                showToast(L10n.toastSaveFailedCheckPermissions)
             }
         }
     }
@@ -187,7 +187,7 @@ final class ClotheslineManager: ObservableObject {
         let screen = NSScreen.main ?? NSScreen.screens.first
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
 
-        let width = min(max(CGFloat(items.count) * 124 + 210, 400), visible.width - 40)
+        let width = min(max(CGFloat(items.count) * 124 + 225, 420), visible.width - 40)
         let height: CGFloat = 148
         let origin = CGPoint(
             x: visible.midX - width / 2,
@@ -331,7 +331,7 @@ struct ClotheslineBarView: View {
                             HStack(spacing: 3) {
                                 Image(systemName: "doc.on.doc.fill")
                                     .font(.system(size: 10, weight: .bold))
-                                Text("复制 (\(manager.selectedItems.count))")
+                                Text(L10n.clotheslineCopyCountLabel(manager.selectedItems.count))
                                     .font(.system(size: 11, weight: .bold))
                             }
                             .padding(.horizontal, 9)
@@ -345,7 +345,7 @@ struct ClotheslineBarView: View {
 
                         HStack(spacing: 6) {
                             Button(action: { manager.toggleSelectAll() }) {
-                                Text(manager.items.allSatisfy(\.isSelected) ? "全不选" : "全选")
+                                Text(L10n.clotheslineSelectAllLabel(allSelected: manager.items.allSatisfy(\.isSelected)))
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundColor(.primary.opacity(0.85))
                             }
@@ -359,7 +359,7 @@ struct ClotheslineBarView: View {
                                     .foregroundColor(.primary.opacity(0.85))
                             }
                             .buttonStyle(.plain)
-                            .help("保存选中")
+                            .help(L10n.clotheslineSaveSelectedTooltip)
 
                             Text("·").foregroundColor(.secondary)
 
@@ -369,7 +369,7 @@ struct ClotheslineBarView: View {
                                     .foregroundColor(.red.opacity(0.85))
                             }
                             .buttonStyle(.plain)
-                            .help("收起晾衣绳")
+                            .help(L10n.clotheslineClearAllTooltip)
                         }
                     }
                     .padding(.horizontal, 10)
@@ -458,6 +458,6 @@ struct HangingPhotoView: View {
                 return NSItemProvider(object: item.compositeImage)
             }
         }
-        .help("单击：选中/取消 · 双击：取下继续标注 · 按住可直接拖拽到聊天框")
+        .help(L10n.clotheslinePhotoHelp)
     }
 }

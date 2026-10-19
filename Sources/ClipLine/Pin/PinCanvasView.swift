@@ -114,7 +114,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         let imgRect = imageRectInView
         let fontSize = vm.strokePreset.textFontSize * vm.scale
         let font = NSFont.systemFont(ofSize: fontSize, weight: .bold)
-        let sampleStr = vm.pendingTextString.isEmpty ? "输入文字..." : vm.pendingTextString
+        let sampleStr = vm.pendingTextString.isEmpty ? L10n.inlineTextPlaceholder : vm.pendingTextString
         let measured = (sampleStr as NSString).size(withAttributes: [.font: font])
         let maxAvailW = max(56, imgRect.width - 4)
         let fieldW = min(maxAvailW, max(92, ceil(measured.width) + 22))
@@ -537,7 +537,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
 
         let fontSize = vm.strokePreset.textFontSize * vm.scale
         let font = NSFont.systemFont(ofSize: fontSize, weight: .bold)
-        let sampleStr = initialText.isEmpty ? "输入文字..." : initialText
+        let sampleStr = initialText.isEmpty ? L10n.inlineTextPlaceholder : initialText
         let measured = (sampleStr as NSString).size(withAttributes: [.font: font])
         let textH = max(measured.height, ("Ag" as NSString).size(withAttributes: [.font: font]).height)
         let maxAvailW = max(56, imgRect.width - 4)
@@ -573,7 +573,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         tf.wantsLayer = true
         tf.layer?.backgroundColor = NSColor.clear.cgColor
         tf.layer?.borderWidth = 0
-        tf.placeholderString = "输入文字..."
+        tf.placeholderString = L10n.inlineTextPlaceholder
         tf.delegate = self
         addSubview(tf)
         window?.makeFirstResponder(tf)

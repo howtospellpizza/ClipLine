@@ -112,10 +112,10 @@ final class ScreenCaptureOverlayController {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "需要「屏幕录制」权限才能截图"
-        alert.informativeText = "请前往「系统设置 → 隐私与安全性 → 屏幕与系统音频录制」，勾选允许当前终端或 ClipLine 可执行程序后重试。"
-        alert.addButton(withTitle: "打开系统设置")
-        alert.addButton(withTitle: "取消")
+        alert.messageText = L10n.alertScreenRecordingTitle
+        alert.informativeText = L10n.alertScreenRecordingBody
+        alert.addButton(withTitle: L10n.alertOpenSystemSettingsButton)
+        alert.addButton(withTitle: L10n.alertCancelButton)
         if alert.runModal() == .alertFirstButtonReturn,
            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
             NSWorkspace.shared.open(url)

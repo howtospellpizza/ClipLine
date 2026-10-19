@@ -88,6 +88,8 @@ clipline --clipboard   # 将剪贴板中的图片贴到屏幕上
 
 | 环境变量 / 配置键 | 默认值 | 说明 |
 | :--- | :--- | :--- |
+| `CLIP_LINE_LANG` | 自动跟随系统语言 | 界面语言覆盖（支持 `en` 或 `zh-Hans`） |
+| `CLIP_LINE_TRANSLATE_TARGET` | `zh-CN`（中文界面）/ `en`（英文界面） | 内置网页翻译的目标语言代码（`tl` 参数） |
 | `CLIP_LINE_TRANSLATE_URL` | 未设置 | 自定义 HTTPS（或 `localhost` HTTP）翻译 URL 模板，使用 `{text}` 占位符 |
 | `TranslateURLTemplate` (`NSGlobalDomain`) | 未设置 | `CLIP_LINE_TRANSLATE_URL` 的 `defaults write` 持久化配置项 |
 | `CLIP_LINE_TRANSLATE_DAEMON` | `fy-daemon` | 本地翻译守护进程名 |
@@ -104,7 +106,7 @@ export CLIP_LINE_TRANSLATE_URL="https://www.deepl.com/translator#en/zh/{text}"
 
 ```bash
 make build   # 编译 Release 二进制文件到 ./build/clipline
-make test    # 运行 80 项单元与 AppKit 回归检查（使用独立剪贴板与临时目录）
+make test    # 运行 86 项单元与 AppKit 回归检查（使用独立剪贴板与临时目录）
 make clean   # 清理 ./build
 ```
 

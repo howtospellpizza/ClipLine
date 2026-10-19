@@ -15,11 +15,19 @@ struct CaptureSelectionResult {
 // MARK: - Annotation Model & Stroke Size Preset
 
 enum StrokePreset: String, CaseIterable, Identifiable {
-    case thin = "细"
-    case medium = "中"
-    case thick = "粗"
+    case thin
+    case medium
+    case thick
 
     var id: String { rawValue }
+
+    var localizedShortLabel: String {
+        L10n.strokeShortLabel(self)
+    }
+
+    var localizedTooltip: String {
+        L10n.strokeTooltip(self)
+    }
 
     var strokeLineWidth: CGFloat {
         switch self {
@@ -55,11 +63,19 @@ enum StrokePreset: String, CaseIterable, Identifiable {
 }
 
 enum TextBackgroundStyle: String, CaseIterable, Identifiable {
-    case transparent = "透明"
-    case black = "黑底"
-    case white = "白底"
+    case transparent
+    case black
+    case white
 
     var id: String { rawValue }
+
+    var localizedShortLabel: String {
+        L10n.textBgShortLabel(self)
+    }
+
+    var localizedTooltip: String {
+        L10n.textBgTooltip(self)
+    }
 
     var fillNSColor: NSColor? {
         switch self {
@@ -75,13 +91,18 @@ enum TextBackgroundStyle: String, CaseIterable, Identifiable {
 
 struct PinAnnotation: Identifiable {
     enum Tool: String, CaseIterable, Identifiable {
-        case rect = "框选"
-        case arrow = "箭头"
-        case pen = "画笔"
-        case mosaic = "马赛克"
-        case text = "文字"
+        case rect
+        case arrow
+        case pen
+        case mosaic
+        case text
 
         var id: String { rawValue }
+
+        var localizedName: String {
+            L10n.toolName(self)
+        }
+
         var icon: String {
             switch self {
             case .rect: return "rectangle"

@@ -40,7 +40,7 @@ Press `P` (or click the clothespin icon) to park the current pin on the clothesl
 
 ### 3. Annotate, OCR, and translate
 
-- **Tools**: Rectangle, arrow, freehand pen, text, and mosaic (`CIPixellate`), with 3 stroke sizes (`细` / `中` / `粗`) and 6 colors.
+- **Tools**: Rectangle, arrow, freehand pen, text, and mosaic (`CIPixellate`), with 3 stroke sizes (`S` / `M` / `L` or `细` / `中` / `粗`) and 6 colors.
 - **Text**: Supports transparent, black pill, or white pill backgrounds. Drag anywhere inside the text box to move it, or double-click committed text to edit it in place.
 - **OCR (`O`)**: Recognizes Simplified Chinese, Traditional Chinese, and English offline via macOS `Vision` and copies the text to your clipboard.
 - **Translate (`T`)**: Runs OCR on the composited image and routes text to:
@@ -88,6 +88,8 @@ On first capture, macOS prompts for **Screen Recording** permission:
 
 | Variable / Key | Default | Description |
 | :--- | :--- | :--- |
+| `CLIP_LINE_LANG` | Auto (`Locale.preferredLanguages`) | UI language override (`en` or `zh-Hans`) |
+| `CLIP_LINE_TRANSLATE_TARGET` | `en` (EN UI) / `zh-CN` (ZH UI) | Target language code (`tl`) for built-in web translation fallback |
 | `CLIP_LINE_TRANSLATE_URL` | Unset | Custom HTTPS (or `localhost` HTTP) URL template using `{text}` placeholder |
 | `TranslateURLTemplate` (`NSGlobalDomain`) | Unset | Persistent `defaults write` equivalent of `CLIP_LINE_TRANSLATE_URL` |
 | `CLIP_LINE_TRANSLATE_DAEMON` | `fy-daemon` | Process name checked for local translation routing |
@@ -104,7 +106,7 @@ export CLIP_LINE_TRANSLATE_URL="https://www.deepl.com/translator#en/zh/{text}"
 
 ```bash
 make build   # compile release binary to ./build/clipline
-make test    # run 80 unit & AppKit checks (uses isolated pasteboard and temp directory)
+make test    # run 86 unit & AppKit checks (uses isolated pasteboard and temp directory)
 make clean   # remove ./build
 ```
 

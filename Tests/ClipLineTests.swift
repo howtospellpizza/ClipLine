@@ -821,5 +821,64 @@ func runAllTests() -> Int32 {
         "cleanupStaleTempFiles preserves non-ClipLine files in target directory"
     )
 
+    // -------------------------------------------------------------------------
+    // Suite 6: Localization (Language Tag Matching, Exhaustive EN/zh-Hans Copy & Toolbar Layout)
+    // -------------------------------------------------------------------------
+    print("\n🔹 Suite 6: Localization (EN & Simplified Chinese)")
+    let originalLang = AppLanguage.current
+    defer { AppLanguage.current = originalLang }
+
+    t.check(
+        AppLanguage.resolveLanguage(envOverride: "zh-CN", preferredLanguages: ["en-US"]) == .zhHans &&
+        AppLanguage.resolveLanguage(envOverride: "en_US", preferredLanguages: ["zh-Hans-CN"]) == .en,
+        "CLIP_LINE_LANG environment override takes precedence over preferredLanguages"
+    )
+    t.check(
+        AppLanguage.resolveLanguage(envOverride: nil, preferredLanguages: ["zh-Hant-HK", "en-US"]) == .en &&
+        AppLanguage.resolveLanguage(envOverride: nil, preferredLanguages: ["zh-Hans-CN", "en-US"]) == .zhHans &&
+        AppLanguage.resolveLanguage(envOverride: nil, preferredLanguages: ["ja-JP", "zh-SG"]) == .zhHans &&
+        AppLanguage.resolveLanguage(envOverride: nil, preferredLanguages: ["fr-FR", "de-DE"]) == .en,
+        "Preferred language resolution matches first supported tag and does not misclassify Traditional Chinese (zh-Hant) as zh-Hans"
+    )
+    t.check(
+        AppLanguage.resolveTranslateTargetLanguage(envOverride: "ja", uiLanguage: .en) == "ja" &&
+        AppLanguage.resolveTranslateTargetLanguage(envOverride: nil, uiLanguage: .en) == "en" &&
+        AppLanguage.resolveTranslateTargetLanguage(envOverride: nil, uiLanguage: .zhHans) == "zh-CN",
+        "CLIP_LINE_TRANSLATE_TARGET overrides default translate target while keeping UI language independent"
+    )
+
+    AppLanguage.current = .en
+    t.check(
+        PinAnnotation.Tool.rect.localizedName == "Rectangle" &&
+        StrokePreset.thin.localizedShortLabel == "S" &&
+        TextBackgroundStyle.transparent.localizedShortLabel == "Clear" &&
+        L10n.toolbarTranslateShortLabel == "Trans" &&
+        L10n.toastCopiedPhotos(1) == "Copied 1 image to clipboard" &&
+        L10n.toastCopiedPhotos(3) == "Copied 3 images to clipboard",
+        "English localization produces compact labels and proper singular/plural toasts"
+    )
+
+    // Verify English toolbar layout with .text tool active (widest configuration: tools + S/M/L + 6 colors + Clear/Dark/Light + actions)
+    let enVM = PinSessionViewModel(image: baseImg)
+    daemon.presentPinPanel(vm: enVM, frame: panelFrame)
+    enVM.activeTool = .text
+    let enToolbarWidth = enVM.toolbarPanel?.frame.width ?? 0
+    let screenVisibleWidth = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame.width ?? 1440
+    t.check(
+        enToolbarWidth > 500 && enToolbarWidth < min(1100, screenVisibleWidth - 16),
+        "English toolbar in widest (.text) state fits cleanly within screen bounds (\(Int(enToolbarWidth))pt)"
+    )
+    enVM.hostingPanel?.onClosePanel?()
+
+    AppLanguage.current = .zhHans
+    t.check(
+        PinAnnotation.Tool.rect.localizedName == "框选" &&
+        StrokePreset.thin.localizedShortLabel == "细" &&
+        TextBackgroundStyle.transparent.localizedShortLabel == "透明" &&
+        L10n.toolbarTranslateShortLabel == "译" &&
+        L10n.toastCopiedPhotos(2) == "已复制 2 张照片到剪贴板",
+        "Simplified Chinese localization produces expected native labels and toasts"
+    )
+
     return t.summary()
 }

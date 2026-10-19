@@ -26,7 +26,7 @@ struct PinToolbarView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(tool.rawValue)
+                .help(tool.localizedName)
             }
 
             if vm.activeTool != nil {
@@ -40,7 +40,7 @@ struct PinToolbarView: View {
                                 Circle()
                                     .fill(vm.strokePreset == preset ? Color.white : Color.primary.opacity(0.75))
                                     .frame(width: preset.dotDiameter, height: preset.dotDiameter)
-                                Text(preset.rawValue)
+                                Text(preset.localizedShortLabel)
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundColor(vm.strokePreset == preset ? .white : .primary.opacity(0.85))
                             }
@@ -53,7 +53,7 @@ struct PinToolbarView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .help("粗细：\(preset.rawValue)")
+                        .help(preset.localizedTooltip)
                     }
                 }
 
@@ -104,7 +104,7 @@ struct PinToolbarView: View {
                                                 .frame(width: 11, height: 11)
                                         }
                                     }
-                                    Text(bgStyle.rawValue)
+                                    Text(bgStyle.localizedShortLabel)
                                         .font(.system(size: 11, weight: .semibold))
                                         .foregroundColor(vm.textBackgroundStyle == bgStyle ? .white : .primary.opacity(0.85))
                                 }
@@ -117,7 +117,7 @@ struct PinToolbarView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .help("文字背景：\(bgStyle.rawValue)")
+                            .help(bgStyle.localizedTooltip)
                         }
                     }
                 }
@@ -133,7 +133,7 @@ struct PinToolbarView: View {
             }
             .buttonStyle(.plain)
             .disabled(vm.annotations.isEmpty)
-            .help("撤销 (Cmd+Z)")
+            .help(L10n.toolbarUndoTooltip)
 
             Button(action: { vm.runOCR(andTranslate: false) }) {
                 HStack(spacing: 3) {
@@ -149,13 +149,13 @@ struct PinToolbarView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("提取图中文字并复制 (O)")
+            .help(L10n.toolbarOCRTooltip)
 
             Button(action: { vm.runOCR(andTranslate: true) }) {
                 HStack(spacing: 3) {
                     Image(systemName: "character.bubble.fill")
                         .font(.system(size: 11.5, weight: .semibold))
-                    Text("译")
+                    Text(L10n.toolbarTranslateShortLabel)
                         .font(.system(size: 11, weight: .semibold))
                 }
                 .padding(.horizontal, 6)
@@ -166,7 +166,7 @@ struct PinToolbarView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("识别图中文字并直接翻译 (T)")
+            .help(L10n.toolbarTranslateTooltip)
 
             Button(action: { vm.saveToFile() }) {
                 Image(systemName: "square.and.arrow.down")
@@ -175,7 +175,7 @@ struct PinToolbarView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("保存为 PNG (Cmd+S)")
+            .help(L10n.toolbarSaveTooltip)
 
             Divider().frame(height: 16)
 
@@ -183,7 +183,7 @@ struct PinToolbarView: View {
                 HStack(spacing: 3) {
                     Image(systemName: "paperclip")
                         .font(.system(size: 11.5, weight: .bold))
-                    Text("夹起")
+                    Text(L10n.toolbarClipLabel)
                         .font(.system(size: 11.5, weight: .semibold))
                 }
                 .padding(.horizontal, 8)
@@ -194,7 +194,7 @@ struct PinToolbarView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("夹到顶部晾衣绳 (快捷键 P / Tab)")
+            .help(L10n.toolbarClipTooltip)
 
             Button(action: {
                 if vm.copyToClipboard() {
@@ -204,7 +204,7 @@ struct PinToolbarView: View {
                 HStack(spacing: 3) {
                     Image(systemName: "checkmark")
                         .font(.system(size: 11.5, weight: .bold))
-                    Text("复制")
+                    Text(L10n.toolbarCopyLabel)
                         .font(.system(size: 11.5, weight: .semibold))
                 }
                 .padding(.horizontal, 8)
@@ -215,7 +215,7 @@ struct PinToolbarView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("复制并关闭 (↵ Enter / Cmd+C)")
+            .help(L10n.toolbarCopyTooltip)
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
@@ -225,7 +225,7 @@ struct PinToolbarView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("关闭贴图 (Esc)")
+            .help(L10n.toolbarCloseTooltip)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)

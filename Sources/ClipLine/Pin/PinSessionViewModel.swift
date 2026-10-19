@@ -520,15 +520,15 @@ final class PinSessionViewModel: ObservableObject {
     func copyToClipboard() -> Bool {
         commitPendingText()
         guard let img = renderCompositeImage() else {
-            showToast("图像合成失败，已拒绝导出未合成原图")
+            showToast(L10n.toastRenderFailedRefusedExport)
             return false
         }
         let pboard = ClotheslineManager.shared.pasteboardProvider()
         guard ClipboardHelper.copyImages([img], pasteboard: pboard, tempDir: ClotheslineManager.shared.tempDirOverride) else {
-            showToast("复制失败，未能写入剪贴板")
+            showToast(L10n.toastCopyFailed)
             return false
         }
-        showToast("已复制到剪贴板")
+        showToast(L10n.toastCopiedSingleImage)
         return true
     }
 
@@ -539,7 +539,7 @@ final class PinSessionViewModel: ObservableObject {
     func saveToFile() {
         commitPendingText()
         guard let img = renderCompositeImage() else {
-            showToast("图像合成失败，无法保存")
+            showToast(L10n.toastRenderFailedCannotSave)
             return
         }
         let panel = NSSavePanel()
@@ -552,9 +552,9 @@ final class PinSessionViewModel: ObservableObject {
         if panel.runModal() == .OK, let url = panel.url {
             if let png = ClipboardHelper.pngData(from: img),
                (try? png.write(to: url, options: .atomic)) != nil {
-                showToast("已保存图片")
+                showToast(L10n.toastSavedSingleImage)
             } else {
-                showToast("保存失败，请检查文件权限")
+                showToast(L10n.toastSaveFailedCheckPermissions)
             }
         }
     }
@@ -587,7 +587,7 @@ final class PinSessionViewModel: ObservableObject {
         return nil
     }
 
-    static func buildGoogleTranslateURL(text: String, targetLang: String = "zh-CN") -> URL? {
+    static func buildGoogleTranslateURL(text: String, targetLang: String = AppLanguage.resolveTranslateTargetLanguage()) -> URL? {
         var components = URLComponents(string: "https://translate.google.com/")
         components?.queryItems = [
             URLQueryItem(name: "sl", value: "auto"),
@@ -636,10 +636,10 @@ final class PinSessionViewModel: ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "即将使用外部翻译服务打开识别文本"
-        alert.informativeText = "当前未检测到本地翻译守护进程。是否允许将 OCR 识别到的文字通过默认浏览器发送到 \(destinationHost)？（后续将记住您的选择）"
-        alert.addButton(withTitle: "允许并打开网页翻译")
-        alert.addButton(withTitle: "仅复制文本，不打开网页")
+        alert.messageText = L10n.alertWebTranslateTitle
+        alert.informativeText = L10n.alertWebTranslateBody(destinationHost: destinationHost)
+        alert.addButton(withTitle: L10n.alertWebTranslateAllowButton)
+        alert.addButton(withTitle: L10n.alertWebTranslateCopyOnlyButton)
         if alert.runModal() == .alertFirstButtonReturn {
             UserDefaults.standard.set(true, forKey: key)
             return true
@@ -649,7 +649,7 @@ final class PinSessionViewModel: ObservableObject {
 
     private func triggerSmartTranslation(for text: String, pasteboard: NSPasteboard) {
         if Self.isTranslationDaemonRunning() {
-            showToast("已识别并唤起翻译")
+            showToast(L10n.toastTranslatedViaDaemon)
             for channel in NotificationChannels.translateChannels {
                 DistributedNotificationCenter.default().postNotificationName(
                     NSNotification.Name(channel),
@@ -670,28 +670,28 @@ final class PinSessionViewModel: ObservableObject {
             let isLocal = (host == "localhost" || host == "127.0.0.1" || host == "::1")
             if !isLocal {
                 guard Self.confirmWebTranslateIfNeeded(destinationHost: host) else {
-                    showToast("OCR 文本已复制（已取消外部网页翻译）")
+                    showToast(L10n.toastOCRCopiedCancelledWebTranslate)
                     return
                 }
             }
-            showToast("已复制文本并打开自定义翻译")
+            showToast(L10n.toastOCRCopiedOpenedCustomTranslate)
             NSWorkspace.shared.open(url)
             return
         }
 
         // Fallback 2: macOS system Translation service if registered, else Google Translate web fallback (with first-time consent)
         if NSPerformService("Translate", pasteboard) {
-            showToast("已唤起 macOS 系统翻译")
+            showToast(L10n.toastOCRCopiedOpenedSystemTranslate)
             return
         }
 
         guard Self.confirmWebTranslateIfNeeded(destinationHost: "translate.google.com") else {
-            showToast("OCR 文本已复制（已取消网页翻译）")
+            showToast(L10n.toastOCRCopiedCancelledWebTranslate)
             return
         }
 
         if let url = Self.buildGoogleTranslateURL(text: text) {
-            showToast("已复制文本并打开网页翻译")
+            showToast(L10n.toastOCRCopiedOpenedWebTranslate)
             NSWorkspace.shared.open(url)
         }
     }
@@ -706,11 +706,11 @@ final class PinSessionViewModel: ObservableObject {
         guard !isClosed else { return }
         let trimmed = recognized.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            showToast("未识别到文字")
+            showToast(L10n.toastOCRNoTextFound)
             return
         }
         guard pasteboard.changeCount == expectedChangeCount else {
-            showToast("剪贴板已更新，未覆盖新内容")
+            showToast(L10n.toastOCRClipboardChangedSkipped)
             return
         }
         pasteboard.clearContents()
@@ -718,7 +718,7 @@ final class PinSessionViewModel: ObservableObject {
         if andTranslate {
             triggerSmartTranslation(for: trimmed, pasteboard: pasteboard)
         } else {
-            showToast("OCR 文本已复制")
+            showToast(L10n.toastOCRTextCopied)
         }
     }
 
@@ -730,7 +730,7 @@ final class PinSessionViewModel: ObservableObject {
               let bitmap = NSBitmapImageRep(data: tiff),
               let cgImage = bitmap.cgImage
         else {
-            showToast("无法读取图像")
+            showToast(L10n.toastUnableToReadImage)
             return
         }
 
@@ -738,7 +738,7 @@ final class PinSessionViewModel: ObservableObject {
         let initialChangeCount = targetPasteboard.changeCount
 
         isPerformingOCR = true
-        showToast(andTranslate ? "正在识别并翻译..." : "正在识别文字...")
+        showToast(L10n.toastOCRInProgress(andTranslate: andTranslate))
 
         activeOCRTask = Task.detached { [weak self] in
             if Task.isCancelled { return }
@@ -755,7 +755,7 @@ final class PinSessionViewModel: ObservableObject {
                     guard let self = self, !self.isClosed else { return }
                     self.isPerformingOCR = false
                     self.activeOCRTask = nil
-                    self.showToast("OCR 识别出错")
+                    self.showToast(L10n.toastOCRError)
                 }
                 return
             }
