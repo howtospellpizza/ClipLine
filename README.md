@@ -11,16 +11,53 @@ Capture screenshots, annotate them, and clip them to a floating clothesline at t
        └──────┘       └──────┘       └──────┘
 ```
 
-## Quickstart
+## Installation & Quickstart
 
-Requires macOS 14+ and Xcode Command Line Tools (`xcode-select --install`).
+### Prerequisites
+
+- macOS 14+ deployment target configured (runtime-tested on the maintainer's current machine; macOS 14/Intel runtime compatibility is not independently verified).
+- Swift 5.9+ command-line tools (`xcode-select --install`). If prompted, complete installation and wait for the installer to finish before proceeding.
+
+### Install from Source
 
 ```bash
+git clone https://github.com/howtospellpizza/ClipLine.git
+cd ClipLine
 make install
-~/.local/bin/clipline &
+nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
 ```
 
+> **Note**: This starts `clipline` in the background for the current session. It does not automatically register a login item or guarantee launch on system startup.
+
 Press `⌃X` (`Control + X`) to capture a region, then press `P` to hang it on the top clothesline.
+
+### Update & Reinstall
+
+To update from the repository checkout:
+
+```bash
+cd /path/to/ClipLine
+git pull --ff-only
+make build
+make uninstall
+make install
+nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
+```
+
+- If `git pull --ff-only` fails due to local changes, stop and resolve your working tree before updating.
+- Always run `make build` before `make uninstall` so any compile failure leaves your existing installed version intact.
+- `make update`, `make version`, or service management make targets do not exist.
+
+### Uninstall
+
+```bash
+make uninstall
+```
+
+- Removes the installed binary (`~/.local/bin/clipline`) and stops the current user's process at that exact installed path, not copies elsewhere.
+- Unloads and removes the daemon LaunchAgent (`~/Library/LaunchAgents/io.github.clipline.daemon.plist`) if present.
+- Unsaved active pins and images parked on the clothesline are lost; PNGs already saved to disk are not removed.
+- Preserves preferences (`defaults`) and macOS TCC permission entries.
 
 ## Usage
 
@@ -51,11 +88,11 @@ Press `P` (or click the clothespin icon) to park the current pin on the clothesl
 
 ### 4. CLI triggers
 
-When the daemon is running, you can also trigger it from a terminal or script:
+When the daemon is running, you can trigger it from a terminal or script (use the full path `~/.local/bin/clipline` unless `~/.local/bin` is in your `PATH`):
 
 ```bash
-clipline --capture     # start interactive region capture
-clipline --clipboard   # pin current clipboard image
+~/.local/bin/clipline --capture     # start interactive region capture
+~/.local/bin/clipline --clipboard   # pin current clipboard image
 ```
 
 ## Shortcuts
@@ -79,10 +116,13 @@ clipline --clipboard   # pin current clipboard image
 
 ## Permissions
 
-On first capture, macOS prompts for **Screen Recording** permission:
+On first capture, macOS prompts for **Screen Recording** permission. The prompt may appear either for `clipline` or for your host terminal application (e.g., Terminal or iTerm2):
 
 1. Open **System Settings → Privacy & Security → Screen & System Audio Recording**.
-2. Enable `clipline`.
+2. Enable `clipline` (or your terminal application if prompted).
+3. Restart the `clipline` process after granting permissions so the changes take effect.
+
+> **Note**: Because binaries built without stable trusted code-signing identity may change signature across recompilations, updates may require re-approving permissions in System Settings.
 
 ## Configuration
 
@@ -107,6 +147,7 @@ export CLIP_LINE_TRANSLATE_URL="https://www.deepl.com/translator#en/zh/{text}"
 ```bash
 make build      # compile release binary to ./build/clipline
 make test       # run 91 unit & AppKit checks (uses isolated pasteboard and temp directory)
+make test-install # check scoped uninstall and reinstall in an isolated directory
 make uninstall  # stop daemon and remove ~/.local/bin/clipline
 make clean      # remove ./build
 ```

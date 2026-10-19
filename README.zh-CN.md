@@ -11,16 +11,53 @@ macOS 原生截图、标注与顶部“晾衣绳”贴图工具。
        └──────┘       └──────┘       └──────┘
 ```
 
-## 快速开始
+## 安装与快速开始
 
-需要 macOS 14+ 与 Xcode Command Line Tools（`xcode-select --install`），无第三方依赖。
+### 前置要求
+
+- 项目配置了 macOS 14+ 部署目标（已在维护者当前机器上通过运行时验证；macOS 14 与 Intel 架构运行兼容性未经独立完整验证）。
+- Swift 5.9+ 命令行工具（`xcode-select --install`）。如弹出安装提示，请等待工具安装完成后再继续。
+
+### 源码安装
 
 ```bash
+git clone https://github.com/howtospellpizza/ClipLine.git
+cd ClipLine
 make install
-~/.local/bin/clipline &
+nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
 ```
 
+> **注意**：该命令会在当前会话后台启动 `clipline`，不会自动注册登录项，亦不保证开机自启。
+
 按 `⌃X`（`Control + X`）框选截图，再按 `P` 即可用小木夹将贴图挂到屏幕顶部的晾衣绳上。
+
+### 更新与重新安装
+
+从本地仓库更新代码：
+
+```bash
+cd /path/to/ClipLine
+git pull --ff-only
+make build
+make uninstall
+make install
+nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
+```
+
+- 若 `git pull --ff-only` 因本地修改报错，请先处理工作区改动后再更新。
+- 务必在 `make uninstall` 之前先执行 `make build`，确保编译失败时原有可用版本不受影响。
+- Makefile 中不存在 `make update`、`make version` 或服务管理相关的 target。
+
+### 卸载
+
+```bash
+make uninstall
+```
+
+- 移除已安装的二进制文件（`~/.local/bin/clipline`），仅停止当前用户在该安装路径运行的进程，不影响其他路径下的副本。
+- 卸载并删除 LaunchAgent 文件（`~/Library/LaunchAgents/io.github.clipline.daemon.plist`，如果存在）。
+- 未保存的贴图和晾衣绳中的图片会丢失；已保存到磁盘的 PNG 文件不会删除。
+- 保留系统偏好设置（`defaults`）与 macOS TCC 权限授权记录。
 
 ## 基本用法
 
@@ -51,11 +88,11 @@ make install
 
 ### 4. 命令行触发
 
-守护进程运行时，也可通过终端或脚本触发：
+守护进程运行时，也可通过终端或脚本触发（除非已将 `~/.local/bin` 加入 `PATH`，请使用完整路径 `~/.local/bin/clipline`）：
 
 ```bash
-clipline --capture     # 启动框选截图
-clipline --clipboard   # 将剪贴板中的图片贴到屏幕上
+~/.local/bin/clipline --capture     # 启动框选截图
+~/.local/bin/clipline --clipboard   # 将剪贴板中的图片贴到屏幕上
 ```
 
 ## 快捷键
@@ -79,10 +116,13 @@ clipline --clipboard   # 将剪贴板中的图片贴到屏幕上
 
 ## 权限设置
 
-首次截图时，macOS 会请求 **屏幕录制** 权限：
+首次截图时，macOS 会请求 **屏幕录制** 权限。授权提示可能针对 `clipline` 或你当前使用的终端软件（如 Terminal、iTerm2）：
 
 1. 打开 **系统设置 → 隐私与安全性 → 录屏与系统录音**。
-2. 勾选启用 `clipline`。
+2. 勾选启用 `clipline`（若提示的是终端软件，则启用对应的终端）。
+3. 授权后请重启 `clipline` 进程，使权限变更生效。
+
+> **注意**：由于未配置受信任的稳定代码签名，重新编译可能会变更签名标识，更新后可能需要在系统设置中重新授权。
 
 ## 配置项
 
@@ -107,6 +147,7 @@ export CLIP_LINE_TRANSLATE_URL="https://www.deepl.com/translator#en/zh/{text}"
 ```bash
 make build      # 编译 Release 二进制文件到 ./build/clipline
 make test       # 运行 91 项单元与 AppKit 回归检查（使用独立剪贴板与临时目录）
+make test-install # Check scoped uninstall and reinstall in an isolated directory
 make uninstall  # 停止守护进程并移除 ~/.local/bin/clipline
 make clean      # 清理 ./build
 ```
