@@ -105,9 +105,10 @@ export CLIP_LINE_TRANSLATE_URL="https://www.deepl.com/translator#en/zh/{text}"
 ## Development
 
 ```bash
-make build   # compile release binary to ./build/clipline
-make test    # run 86 unit & AppKit checks (uses isolated pasteboard and temp directory)
-make clean   # remove ./build
+make build      # compile release binary to ./build/clipline
+make test       # run 86 unit & AppKit checks (uses isolated pasteboard and temp directory)
+make uninstall  # stop daemon and remove ~/.local/bin/clipline
+make clean      # remove ./build
 ```
 
 ## Privacy & Security Notes

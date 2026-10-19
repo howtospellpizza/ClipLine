@@ -105,9 +105,10 @@ export CLIP_LINE_TRANSLATE_URL="https://www.deepl.com/translator#en/zh/{text}"
 ## 开发与测试
 
 ```bash
-make build   # 编译 Release 二进制文件到 ./build/clipline
-make test    # 运行 86 项单元与 AppKit 回归检查（使用独立剪贴板与临时目录）
-make clean   # 清理 ./build
+make build      # 编译 Release 二进制文件到 ./build/clipline
+make test       # 运行 86 项单元与 AppKit 回归检查（使用独立剪贴板与临时目录）
+make uninstall  # 停止守护进程并移除 ~/.local/bin/clipline
+make clean      # 清理 ./build
 ```
 
 ## 隐私与安全说明
