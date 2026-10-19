@@ -31,6 +31,19 @@ nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
 
 Click the keyboard icon (`⌨️`) on any pin toolbar (or press `⌘,` on a pin window, or run `~/.local/bin/clipline --settings`) to view or edit all global shortcuts. Factory defaults: `⌃X` captures a region, `⌘⇧X` is the secondary capture shortcut, and `⌃⌘V` pins the clipboard image.
 
+### Install with an AI Coding Agent
+
+Paste this prompt into Claude Code, OpenCode, Cursor, or Codex:
+
+```text
+Install ClipLine from https://github.com/howtospellpizza/ClipLine by following its README:
+1. Check that macOS 14+ and Swift 5.9+ command-line tools (`swiftc --version`) are available.
+2. If an existing `~/.local/bin/clipline` binary, running `clipline` process, or checkout is present, ask before overwriting, uninstalling, or deleting anything.
+3. Clone the repository, run `make install`, and start the background daemon (`nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &`). Do not register a LaunchAgent or login item unless asked.
+4. Verify the install by running `~/.local/bin/clipline --help`, `~/.local/bin/clipline --shortcuts`, and checking `pgrep -x clipline` plus `$HOME/Library/Logs/clipline.log`.
+5. Remind me to grant Screen Recording permission in System Settings -> Privacy & Security -> Screen & System Audio Recording and test one capture (`⌃X`), since macOS TCC approval requires manual user interaction.
+```
+
 ### Update & Reinstall
 
 To update from the repository checkout:

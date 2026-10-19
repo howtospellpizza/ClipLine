@@ -31,6 +31,19 @@ nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
 
 点击截图工具栏右侧的键盘图标 `⌨️`（或在贴图窗口按 `⌘,`，或运行 `~/.local/bin/clipline --settings`），即可查看或编辑全部全局快捷键。出厂默认值：`⌃X` 框选截图，`⌘⇧X` 为备用截图快捷键，`⌃⌘V` 将剪贴板图片贴到屏幕上。
 
+### 让 AI 助手帮你安装
+
+将以下提示词复制给 Claude Code、OpenCode、Cursor 或 Codex：
+
+```text
+请参照仓库 README 帮我安装 ClipLine（https://github.com/howtospellpizza/ClipLine）：
+1. 检查当前环境是否满足 macOS 14+ 与 Swift 5.9+ 命令行工具（`swiftc --version`）。
+2. 若检测到已有 `~/.local/bin/clipline`、正在运行的 `clipline` 进程或本地仓库修改，请先向我确认，不要直接覆盖、卸载或删除。
+3. 克隆仓库并执行 `make install`，随后在后台启动守护进程（`nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &`）。除非我明确要求，不要自动注册 LaunchAgent 或开机登录项。
+4. 运行 `~/.local/bin/clipline --help`、`~/.local/bin/clipline --shortcuts`，并检查 `pgrep -x clipline` 与 `$HOME/Library/Logs/clipline.log` 验证安装结果。
+5. 提醒我前往「系统设置 → 隐私与安全性 → 录屏与系统录音」手动开启屏幕录制权限，并按一次 `⌃X` 测试截图与复制（macOS TCC 权限无法由脚本自动绕过）。
+```
+
 ### 更新与重新安装
 
 从本地仓库更新代码：
@@ -154,7 +167,7 @@ export CLIP_LINE_TRANSLATE_URL="https://www.deepl.com/translator#en/zh/{text}"
 ```bash
 make build      # 编译 Release 二进制文件到 ./build/clipline
 make test       # 运行单元与 AppKit 回归检查（使用独立快捷键设置、剪贴板与临时目录）
-make test-install # Check scoped uninstall and reinstall in an isolated directory
+make test-install # 在隔离目录中验证卸载与重装流程
 make uninstall  # 停止守护进程并移除 ~/.local/bin/clipline
 make clean      # 清理 ./build
 ```
