@@ -53,20 +53,30 @@ nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
 
 ### 更新与重新安装
 
-从本地仓库更新代码：
+从官方 `main` 分支更新当前运行的二进制文件：
+
+```bash
+~/.local/bin/clipline --update
+```
+
+更新器会下载一份全新的临时仓库副本，先完成编译，再替换当前调用的二进制文件，不会修改本地仓库。更新需要连接 GitHub 下载公开源码；ClipLine 不会上传截图、剪贴板内容或偏好设置。
+
+- 如果现有安装使用证书签名，只有在可用原签名身份时才会更新。否则，更新器会在替换二进制文件前停止并给出说明；它不会删除 macOS 权限设置。Ad-hoc 签名的版本更新后可能需要重新授权屏幕录制。
+- 如果已注册的 LaunchAgent 确实指向当前二进制文件，更新器会重启该任务，但不会新建 LaunchAgent。否则，只有检测到相同可执行文件路径的守护进程正在运行时，才会停止并重启该进程；新进程使用更新器当前的环境变量，无法恢复仅存在于旧进程中的环境变量。
+- 活动贴图尚未保存，守护进程重启时可能丢失。更新前请先保存重要内容。如果没有匹配的运行中守护进程或 LaunchAgent，更新器不会启动应用。
+
+`make install` 仅用于本地编译并复制：它会构建 `build/clipline`，再复制到 `~/.local/bin/clipline`。它不会对二进制文件签名、停止或重启守护进程，也不会注册或管理 LaunchAgent。也可以从本地仓库更新：
 
 ```bash
 cd /path/to/ClipLine
 git pull --ff-only
 make build
-make uninstall
 make install
-nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
 ```
 
 - 若 `git pull --ff-only` 因本地修改报错，请先处理工作区改动后再更新。
-- 务必在 `make uninstall` 之前先执行 `make build`，确保编译失败时原有可用版本不受影响。
-- Makefile 中不存在 `make update`、`make version` 或服务管理相关的 target。
+- 保存活动贴图后，请手动重启守护进程；`make install` 不会重启它。
+- `clipline --update` 是命令行功能；Makefile 中不存在 `make update`、`make version` 或服务管理相关的 target。
 
 ### 卸载
 
@@ -115,6 +125,7 @@ make uninstall
 ~/.local/bin/clipline --clipboard   # 将剪贴板中的图片贴到屏幕上
 ~/.local/bin/clipline --settings    # 打开快捷键设置（必要时启动守护进程）
 ~/.local/bin/clipline --shortcuts   # 以 JSON 输出当前全局快捷键
+~/.local/bin/clipline --update      # 从官方 main 更新当前调用的二进制文件
 ```
 
 截图与剪贴板命令会触发正在运行的守护进程。快捷键设置保存在 `io.github.clipline` UserDefaults 套件中。
@@ -149,7 +160,7 @@ Carbon 独占注册只能检测其他使用独占 Carbon 注册的快捷键冲�
 2. 勾选启用 `clipline`（若提示的是终端软件，则启用对应的终端）。
 3. 授权后请重启 `clipline` 进程，使权限变更生效。
 
-> **注意**：由于未配置受信任的稳定代码签名，重新编译可能会变更签名标识，更新后可能需要在系统设置中重新授权。
+> **注意**：更新器会在可用时复用现有证书签名身份与标识。Ad-hoc 签名的版本更新后，可能需要在系统设置中重新授权屏幕录制。
 
 ## 配置项
 

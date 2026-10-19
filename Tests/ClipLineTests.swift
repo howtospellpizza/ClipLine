@@ -1447,5 +1447,7 @@ func runAllTests() -> Int32 {
         "Simplified Chinese localization produces expected native labels and toasts"
     )
 
+    runClipLineUpdaterTests(t)
+
     return t.summary()
 }

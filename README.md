@@ -53,20 +53,30 @@ Install ClipLine from https://github.com/howtospellpizza/ClipLine by following i
 
 ### Update & Reinstall
 
-To update from the repository checkout:
+Update the executable you invoked from the latest official `main` branch:
+
+```bash
+~/.local/bin/clipline --update
+```
+
+The updater downloads a fresh temporary checkout, builds before replacing the currently invoked executable, and does not modify a local repository checkout. It contacts GitHub to fetch public source; ClipLine does not upload screenshots, clipboard contents, or preferences.
+
+- A certificate-signed install is updated only when its signing identity is available. Otherwise, the update stops before replacing the binary and gives instructions; it never removes macOS permission settings. Ad-hoc builds may require Screen Recording reapproval.
+- If an already registered LaunchAgent targets this exact executable, the updater restarts that job and never creates one. Otherwise, it restarts only a running daemon at the same executable path, using the updater's current environment. Environment overrides unique to the old process cannot be recovered.
+- Active pins are unsaved and may be lost when the daemon restarts. Save anything important before updating. If no matching daemon or LaunchAgent is running, the updater leaves the app stopped.
+
+`make install` is a local build-and-copy operation only: it builds `build/clipline` and copies it to `~/.local/bin/clipline`. It does not sign the binary, stop or restart a daemon, or register/manage a LaunchAgent. To update from a local checkout instead:
 
 ```bash
 cd /path/to/ClipLine
 git pull --ff-only
 make build
-make uninstall
 make install
-nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
 ```
 
-- If `git pull --ff-only` fails due to local changes, stop and resolve your working tree before updating.
-- Always run `make build` before `make uninstall` so any compile failure leaves your existing installed version intact.
-- `make update`, `make version`, or service management make targets do not exist.
+- If `git pull --ff-only` fails due to local changes, resolve your working tree before updating.
+- Restart the daemon manually after saving active pins; `make install` does not restart it.
+- `clipline --update` is a CLI command; `make update`, `make version`, and service-management Make targets do not exist.
 
 ### Uninstall
 
@@ -115,6 +125,7 @@ Use the full path `~/.local/bin/clipline` unless `~/.local/bin` is in your `PATH
 ~/.local/bin/clipline --clipboard   # pin current clipboard image
 ~/.local/bin/clipline --settings    # open shortcut settings (starts the daemon if needed)
 ~/.local/bin/clipline --shortcuts   # print current global shortcuts as JSON
+~/.local/bin/clipline --update      # update the invoked executable from official main
 ```
 
 The capture and clipboard commands trigger a running daemon. Shortcut settings persist in the `io.github.clipline` UserDefaults suite.
@@ -149,7 +160,7 @@ On first capture, macOS prompts for **Screen Recording** permission. The prompt 
 2. Enable `clipline` (or your terminal application if prompted).
 3. Restart the `clipline` process after granting permissions so the changes take effect.
 
-> **Note**: Because binaries built without stable trusted code-signing identity may change signature across recompilations, updates may require re-approving permissions in System Settings.
+> **Note**: The updater reuses the existing certificate signing identity and identifier when available. Ad-hoc builds may require re-approving Screen Recording in System Settings after an update.
 
 ## Configuration
 

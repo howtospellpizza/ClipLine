@@ -3,7 +3,7 @@ INSTALL_DIR = $(HOME)/.local/bin
 PLIST_LABEL = io.github.clipline.daemon
 PLIST_PATH = $(HOME)/Library/LaunchAgents/$(PLIST_LABEL).plist
 SRC = $(shell find Sources/ClipLine -name '*.swift' | sort)
-TEST_SRC = Tests/ClipLineTests.swift
+TEST_SRC = $(shell find Tests -name '*.swift' | sort)
 MACOS_MIN_VERSION = 14.0
 TARGET = $(shell uname -m)-apple-macosx$(MACOS_MIN_VERSION)
 

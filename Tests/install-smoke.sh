@@ -11,7 +11,12 @@ trap 'kill ${other_pid:-} ${installed_pid:-} 2>/dev/null || true' EXIT
 
 mkdir -p "$install_dir" "$root/other"
 cp build/clipline "$install_dir/clipline"
-"$install_dir/clipline" --help
+help=$("$install_dir/clipline" --help)
+printf '%s\n' "$help"
+case "$help" in
+    *"--update"*) ;;
+    *) echo "FAIL: --help does not list --update" >&2; exit 1 ;;
+esac
 
 # Stand-in processes exercise path-scoped termination, not GUI/TCC state.
 mv "$install_dir/clipline" "$root/compiled-clipline"

@@ -51,6 +51,21 @@ private func requestSettingsFromRunningDaemon() -> Bool {
 }
 
 let args = CommandLine.arguments
+if args.count >= 2 && args[1] == "--update" {
+    print("[ClipLine] \(ClipLineUpdater.updateNotice)")
+    do {
+        let executableURL = try ClipLineUpdater.currentExecutableURL()
+        let context = ClipLineUpdateContext.current(executableURL: executableURL)
+        let report = try ClipLineUpdater(context: context).update()
+        print("[ClipLine] Updated to commit \(report.commit).")
+        print("[ClipLine] \(report.restartMessage)")
+        exit(0)
+    } catch {
+        fputs("[ClipLine] Error: \(error.localizedDescription)\n", stderr)
+        exit(1)
+    }
+}
+
 var startupSettingsRequested = false
 var startupLockAcquired = false
 if args.count >= 2 {
@@ -63,6 +78,7 @@ if args.count >= 2 {
           -c, --clipboard  Pin current clipboard image on screen
           --settings       Open keyboard shortcut settings (starts the daemon if needed)
           --shortcuts      Print current global shortcuts as JSON
+          --update         Download, build, and install the latest official version
           -h, --help       Show this help message
         """)
         exit(0)
