@@ -787,11 +787,26 @@ func runAllTests() -> Int32 {
     }
 
     // -------------------------------------------------------------------------
-    // Suite 5: Multi-Image Stitching & Scoped Temp File Hygiene
+    // Suite 5: Multi-Image Pasteboard Copy & Scoped Temp File Hygiene
     // -------------------------------------------------------------------------
-    print("\n🔹 Suite 5: Multi-Image Stitching & Scoped Temp File Hygiene")
+    print("\n🔹 Suite 5: Multi-Image Pasteboard Copy & Scoped Temp File Hygiene")
     let img1 = makeTextImage(text: "CLIP ONE", size: NSSize(width: 200, height: 60))
     let img2 = makeTextImage(text: "CLIP TWO", size: NSSize(width: 240, height: 80))
+    let copiedMulti = ClipboardHelper.copyImages([img1, img2], pasteboard: testPasteboard, tempDir: testTempDirURL.path)
+    let pbItems = testPasteboard.pasteboardItems ?? []
+    t.check(
+        copiedMulti && pbItems.count == 2,
+        "copyImages writes 2 separate NSPasteboardItems when 2 images are selected",
+        detail: "got \(pbItems.count) items"
+    )
+    let item0HasDataAndFile = (pbItems.first?.data(forType: .png) != nil) && (pbItems.first?.string(forType: .fileURL) != nil)
+    let item1HasDataAndFile = (pbItems.last?.data(forType: .png) != nil) && (pbItems.last?.string(forType: .fileURL) != nil)
+    t.check(
+        item0HasDataAndFile && item1HasDataAndFile &&
+        pbItems.first?.string(forType: .fileURL) != pbItems.last?.string(forType: .fileURL),
+        "Each NSPasteboardItem carries its own independent PNG data, TIFF data, and unique fileURL"
+    )
+
     let stitched = ClipboardHelper.stitchImagesGrid([img1, img2])
     t.check(
         stitched.size == NSSize(width: 240, height: 152),

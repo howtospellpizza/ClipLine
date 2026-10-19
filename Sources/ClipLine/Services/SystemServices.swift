@@ -115,43 +115,30 @@ enum ClipboardHelper {
         let dir = tempDir ?? Self.tempDir
         cleanupStaleTempFiles(in: dir)
 
-        let targetImage: NSImage
-        let prefix: String
-        if images.count == 1, let img = images.first {
-            targetImage = img
-            prefix = "ClipLine"
-        } else {
-            targetImage = stitchImagesGrid(images)
-            prefix = "ClipLine_Stitched"
+        var items: [NSPasteboardItem] = []
+        items.reserveCapacity(images.count)
+
+        for (index, image) in images.enumerated() {
+            guard let png = pngData(from: image) else {
+                return false
+            }
+            let prefix = images.count == 1 ? "ClipLine" : "ClipLine_\(index + 1)"
+            let fileURL = uniqueTempFileURL(prefix: prefix, tempDir: dir)
+            let wroteFile = (try? png.write(to: fileURL, options: .atomic)) != nil
+
+            let item = NSPasteboardItem()
+            item.setData(png, forType: .png)
+            if let tiff = image.tiffRepresentation {
+                item.setData(tiff, forType: .tiff)
+            }
+            if wroteFile {
+                item.setString(fileURL.absoluteString, forType: .fileURL)
+            }
+            items.append(item)
         }
 
-        return writeSingleImageToPasteboard(targetImage, pasteboard: pasteboard, tempDir: dir, prefix: prefix)
-    }
-
-    @discardableResult
-    private static func writeSingleImageToPasteboard(
-        _ image: NSImage,
-        pasteboard: NSPasteboard,
-        tempDir: String,
-        prefix: String = "ClipLine"
-    ) -> Bool {
-        guard let png = pngData(from: image) else {
-            return false
-        }
-
-        let fileURL = uniqueTempFileURL(prefix: prefix, tempDir: tempDir)
-        let wroteFile = (try? png.write(to: fileURL, options: .atomic)) != nil
-
-        let item = NSPasteboardItem()
-        item.setData(png, forType: .png)
-        if let tiff = image.tiffRepresentation {
-            item.setData(tiff, forType: .tiff)
-        }
-        if wroteFile {
-            item.setString(fileURL.absoluteString, forType: .fileURL)
-        }
         pasteboard.clearContents()
-        return pasteboard.writeObjects([item])
+        return pasteboard.writeObjects(items)
     }
 
     static func pngData(from image: NSImage) -> Data? {

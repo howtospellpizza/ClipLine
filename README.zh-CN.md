@@ -34,7 +34,7 @@ make install
 
 按 `P`（或点击工具栏上的木夹图标）把当前贴图挂到屏幕顶部的晾衣绳：
 
-- **拼接复制**：在晾衣绳上点选多张缩略图，点击 **复制** 即可纵向拼合为一张图片写入剪贴板。
+- **多图批量复制与导出**：在晾衣绳上点选多张缩略图，点击 **复制**（或下载图标）即可一次性将选中的多张独立图片写入剪贴板或保存到文件夹。
 - **拖拽导出**：直接按住缩略图拖入 Slack、浏览器或 Finder。
 - **取回编辑**：双击任意缩略图即可取回画布继续编辑。
 
@@ -106,7 +106,7 @@ export CLIP_LINE_TRANSLATE_URL="https://www.deepl.com/translator#en/zh/{text}"
 
 ```bash
 make build      # 编译 Release 二进制文件到 ./build/clipline
-make test       # 运行 86 项单元与 AppKit 回归检查（使用独立剪贴板与临时目录）
+make test       # 运行 88 项单元与 AppKit 回归检查（使用独立剪贴板与临时目录）
 make uninstall  # 停止守护进程并移除 ~/.local/bin/clipline
 make clean      # 清理 ./build
 ```
