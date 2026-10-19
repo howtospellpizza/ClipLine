@@ -11,14 +11,43 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
     private(set) var activeToolbars: [UUID: NSPanel] = [:]
     private var localKeyMonitor: Any?
     private let captureController = ScreenCaptureOverlayController()
-    private var hotKeyRefCtrlX: EventHotKeyRef?
-    private var hotKeyRefCmdShiftX: EventHotKeyRef?
-    private var hotKeyRefCmdCtrlV: EventHotKeyRef?
+    private let shortcutStore = ShortcutConfigurationStore(
+        defaults: UserDefaults(suiteName: ShortcutConfigurationStore.suiteName)!
+    )
+    private var shortcutRuntime: ShortcutRuntime?
+    private var shortcutSettingsModel: ShortcutSettingsModel?
+    private var settingsWindowController: ShortcutSettingsWindowController?
+    private var statusItem: NSStatusItem?
+    private var hotKeyRefs: [ShortcutAction: EventHotKeyRef] = [:]
+    private var hotKeyEventHandler: EventHandlerRef?
+    private var handledSettingsRequestIDs: Set<String> = []
     private var isCapturing: Bool = false
+    var openSettingsOnLaunch = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         ClipboardHelper.cleanupStaleTempFiles()
-        registerGlobalHotKeys()
+        installGlobalHotKeyHandler()
+
+        let runtime = ShortcutRuntime(
+            configuration: shortcutStore.load(),
+            register: { [weak self] action, binding in
+                self?.registerGlobalHotKey(action, binding: binding) ?? OSStatus(paramErr)
+            },
+            unregister: { [weak self] action in
+                self?.unregisterGlobalHotKey(action) ?? OSStatus(paramErr)
+            }
+        )
+        shortcutRuntime = runtime
+        let launchFailures = runtime.registerAtLaunch()
+        for failure in launchFailures {
+            fputs("[ClipLine] Warning: Failed to register \(failure.action.rawValue) hotkey (OSStatus \(failure.status))\n", stderr)
+        }
+        shortcutSettingsModel = ShortcutSettingsModel(
+            store: shortcutStore,
+            runtime: runtime,
+            launchRegistrationFailures: launchFailures
+        )
+        setupStatusItem()
 
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self else { return event }
@@ -49,6 +78,15 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
                 object: nil
             )
         }
+        for channel in NotificationChannels.settingsChannels {
+            DistributedNotificationCenter.default().addObserver(
+                self,
+                selector: #selector(handleExternalSettingsRequest(_:)),
+                name: NSNotification.Name(channel),
+                object: nil
+            )
+        }
+        if openSettingsOnLaunch { showShortcutSettings() }
     }
 
     @objc private func handleExternalCaptureTrigger(_ note: Notification) {
@@ -60,7 +98,38 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func registerGlobalHotKeys() {
+    @objc private func handleExternalSettingsRequest(_ note: Notification) {
+        guard let requestID = note.userInfo?["requestID"] as? String,
+              let replyChannel = note.userInfo?["replyChannel"] as? String,
+              replyChannel == NotificationChannels.settingsAcknowledgementChannel(for: requestID) else {
+            showShortcutSettings()
+            return
+        }
+
+        if handledSettingsRequestIDs.insert(requestID).inserted {
+            showShortcutSettings()
+        }
+        DistributedNotificationCenter.default().postNotificationName(
+            NSNotification.Name(replyChannel),
+            object: nil,
+            userInfo: ["requestID": requestID],
+            deliverImmediately: true
+        )
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        for action in Array(hotKeyRefs.keys) { _ = unregisterGlobalHotKey(action) }
+        if let hotKeyEventHandler {
+            RemoveEventHandler(hotKeyEventHandler)
+            self.hotKeyEventHandler = nil
+        }
+        DistributedNotificationCenter.default().removeObserver(self)
+        if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
+        localKeyMonitor = nil
+    }
+
+    private func installGlobalHotKeyHandler() {
+        guard hotKeyEventHandler == nil else { return }
         var eventType = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
             eventKind: UInt32(kEventHotKeyPressed)
@@ -74,7 +143,7 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
                 guard let userData = userData, let event = event else { return noErr }
                 let daemon = Unmanaged<PinDaemonApp>.fromOpaque(userData).takeUnretainedValue()
                 var hkID = EventHotKeyID()
-                GetEventParameter(
+                let status = GetEventParameter(
                     event,
                     EventParamName(kEventParamDirectObject),
                     EventParamType(typeEventHotKeyID),
@@ -83,65 +152,104 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
                     nil,
                     &hkID
                 )
-                Task { @MainActor in
-                    if hkID.id == 1 || hkID.id == 3 {
-                        daemon.startInteractiveCapture()
-                    } else if hkID.id == 2 {
-                        daemon.pinFromClipboard()
-                    }
+                guard status == noErr, let action = ShortcutAction.from(carbonID: hkID.id) else {
+                    return noErr
                 }
+                Task { @MainActor in daemon.handleGlobalShortcut(action) }
                 return noErr
             },
             1,
             &eventType,
             selfPtr,
-            nil
+            &hotKeyEventHandler
         )
         if handlerStatus != noErr {
             fputs("[ClipLine] Warning: InstallEventHandler failed with OSStatus \(handlerStatus)\n", stderr)
         }
+    }
 
-        // Primary screenshot hotkey: Control + X
-        let hkID1 = EventHotKeyID(signature: OSType(0x50583031), id: 1)
-        let st1 = RegisterEventHotKey(
-            UInt32(kVK_ANSI_X),
-            UInt32(controlKey),
-            hkID1,
-            GetApplicationEventTarget(),
-            0,
-            &hotKeyRefCtrlX
+    private func registerGlobalHotKey(_ action: ShortcutAction, binding: ShortcutBinding) -> OSStatus {
+        guard hotKeyRefs[action] == nil, hotKeyEventHandler != nil else { return OSStatus(paramErr) }
+        let hotKeyID = EventHotKeyID(
+            signature: OSType(0x50583030 + action.carbonID),
+            id: action.carbonID
         )
-        if st1 != noErr {
-            fputs("[ClipLine] Warning: Failed to register Control+X hotkey (OSStatus \(st1))\n", stderr)
+        var hotKeyRef: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            UInt32(binding.keyCode),
+            binding.carbonModifiers,
+            hotKeyID,
+            GetApplicationEventTarget(),
+            OptionBits(kEventHotKeyExclusive),
+            &hotKeyRef
+        )
+        if status == noErr, let hotKeyRef {
+            hotKeyRefs[action] = hotKeyRef
+        }
+        return status
+    }
+
+    private func unregisterGlobalHotKey(_ action: ShortcutAction) -> OSStatus {
+        guard let hotKeyRef = hotKeyRefs[action] else { return noErr }
+        let status = UnregisterEventHotKey(hotKeyRef)
+        if status == noErr { hotKeyRefs.removeValue(forKey: action) }
+        return status
+    }
+
+    private func handleGlobalShortcut(_ action: ShortcutAction) {
+        switch action {
+        case .capture, .captureSecondary: startInteractiveCapture()
+        case .clipboard: pinFromClipboard()
+        }
+    }
+
+    private func setupStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem = item
+        if let button = item.button {
+            button.image = NSImage(systemSymbolName: "scissors", accessibilityDescription: "ClipLine")
+            button.image?.isTemplate = true
+            button.setAccessibilityLabel("ClipLine")
         }
 
-        // Pin from clipboard hotkey: Control + Command + V
-        let hkID2 = EventHotKeyID(signature: OSType(0x50583032), id: 2)
-        let st2 = RegisterEventHotKey(
-            UInt32(kVK_ANSI_V),
-            UInt32(cmdKey | controlKey),
-            hkID2,
-            GetApplicationEventTarget(),
-            0,
-            &hotKeyRefCmdCtrlV
-        )
-        if st2 != noErr {
-            fputs("[ClipLine] Warning: Failed to register Control+Command+V hotkey (OSStatus \(st2))\n", stderr)
-        }
+        let menu = NSMenu()
+        menu.addItem(menuItem(L10n.shortcutMenuCapture, action: #selector(menuCapture(_:))))
+        menu.addItem(menuItem(L10n.shortcutMenuClipboard, action: #selector(menuClipboard(_:))))
+        menu.addItem(.separator())
+        menu.addItem(menuItem(L10n.shortcutMenuSettings, action: #selector(menuSettings(_:))))
+        menu.addItem(.separator())
+        menu.addItem(menuItem(L10n.shortcutMenuQuit, action: #selector(menuQuit(_:))))
+        item.menu = menu
+    }
 
-        // Secondary screenshot hotkey: Command + Shift + X
-        let hkID3 = EventHotKeyID(signature: OSType(0x50583033), id: 3)
-        let st3 = RegisterEventHotKey(
-            UInt32(kVK_ANSI_X),
-            UInt32(cmdKey | shiftKey),
-            hkID3,
-            GetApplicationEventTarget(),
-            0,
-            &hotKeyRefCmdShiftX
-        )
-        if st3 != noErr {
-            fputs("[ClipLine] Warning: Failed to register Command+Shift+X hotkey (OSStatus \(st3))\n", stderr)
+    private func menuItem(_ title: String, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        return item
+    }
+
+    @objc private func menuCapture(_ sender: Any?) {
+        startInteractiveCapture()
+    }
+
+    @objc private func menuClipboard(_ sender: Any?) {
+        pinFromClipboard()
+    }
+
+    @objc private func menuSettings(_ sender: Any?) {
+        showShortcutSettings()
+    }
+
+    @objc private func menuQuit(_ sender: Any?) {
+        NSApp.terminate(nil)
+    }
+
+    private func showShortcutSettings() {
+        guard let shortcutSettingsModel else { return }
+        if settingsWindowController == nil {
+            settingsWindowController = ShortcutSettingsWindowController(model: shortcutSettingsModel)
         }
+        settingsWindowController?.show()
     }
 
     func startInteractiveCapture() {

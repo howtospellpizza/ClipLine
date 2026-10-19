@@ -540,4 +540,203 @@ enum L10n {
         case .zhHans: return "仅复制文本，不打开网页"
         }
     }
+
+    // MARK: - Global Shortcut Settings
+
+    static var shortcutMenuCapture: String {
+        switch AppLanguage.current {
+        case .en: return "Capture Region"
+        case .zhHans: return "框选截图"
+        }
+    }
+
+    static var shortcutMenuClipboard: String {
+        switch AppLanguage.current {
+        case .en: return "Pin Clipboard Image"
+        case .zhHans: return "贴上剪贴板图片"
+        }
+    }
+
+    static var shortcutMenuSettings: String {
+        switch AppLanguage.current {
+        case .en: return "Keyboard Shortcuts…"
+        case .zhHans: return "键盘快捷键…"
+        }
+    }
+
+    static var shortcutMenuQuit: String {
+        switch AppLanguage.current {
+        case .en: return "Quit ClipLine"
+        case .zhHans: return "退出 ClipLine"
+        }
+    }
+
+    static var shortcutWindowTitle: String {
+        switch AppLanguage.current {
+        case .en: return "Keyboard Shortcuts"
+        case .zhHans: return "键盘快捷键"
+        }
+    }
+
+    static var shortcutSettingsHeading: String {
+        switch AppLanguage.current {
+        case .en: return "Global Shortcuts"
+        case .zhHans: return "全局快捷键"
+        }
+    }
+
+    static var shortcutSettingsHelp: String {
+        switch AppLanguage.current {
+        case .en: return "Click a shortcut to record. Use Control, Option, or Command with a key. Escape cancels; Tab moves focus."
+        case .zhHans: return "点击快捷键按钮开始录制。请使用 Control、Option 或 Command 加一个按键。按 Escape 取消，按 Tab 移动焦点。"
+        }
+    }
+
+    static var shortcutRecordingTitle: String {
+        switch AppLanguage.current {
+        case .en: return "Type shortcut…"
+        case .zhHans: return "请按下快捷键…"
+        }
+    }
+
+    static var shortcutRecordingAccessibilityValue: String {
+        switch AppLanguage.current {
+        case .en: return "Recording; press Escape to cancel"
+        case .zhHans: return "正在录制；按 Escape 取消"
+        }
+    }
+
+    static var shortcutRestoreDefaults: String {
+        switch AppLanguage.current {
+        case .en: return "Restore Defaults"
+        case .zhHans: return "恢复默认值"
+        }
+    }
+
+    static func shortcutName(_ action: ShortcutAction, lang: AppLanguage = .current) -> String {
+        switch lang {
+        case .en:
+            switch action {
+            case .capture: return "Capture Region"
+            case .captureSecondary: return "Secondary Capture"
+            case .clipboard: return "Pin Clipboard Image"
+            }
+        case .zhHans:
+            switch action {
+            case .capture: return "框选截图"
+            case .captureSecondary: return "备用截图"
+            case .clipboard: return "贴上剪贴板图片"
+            }
+        }
+    }
+
+    static func shortcutButtonLabel(
+        _ action: ShortcutAction,
+        binding: ShortcutBinding,
+        lang: AppLanguage = .current
+    ) -> String {
+        switch lang {
+        case .en: return "\(shortcutName(action, lang: lang)) shortcut, currently \(binding.displayString)"
+        case .zhHans: return "\(shortcutName(action, lang: lang))快捷键，当前为 \(binding.displayString)"
+        }
+    }
+
+    static func shortcutValidationMessage(
+        _ error: ShortcutValidationError,
+        lang: AppLanguage = .current
+    ) -> String {
+        switch error {
+        case .unsupportedModifiers:
+            switch lang {
+            case .en: return "This modifier combination is not supported."
+            case .zhHans: return "不支持此修饰键组合。"
+            }
+        case .requiredModifier:
+            switch lang {
+            case .en: return "Use at least Control, Option, or Command with a key."
+            case .zhHans: return "请至少使用 Control、Option 或 Command 修饰键。"
+            }
+        case .unsupportedKeyCode(let keyCode):
+            switch lang {
+            case .en: return "This key is not supported (key code \(keyCode))."
+            case .zhHans: return "不支持此按键（键码 \(keyCode)）。"
+            }
+        case .reservedShortcut:
+            switch lang {
+            case .en: return "That key is reserved for system or app navigation. Choose another."
+            case .zhHans: return "该按键保留给系统或应用导航，请选择其他按键。"
+            }
+        case .duplicate(let first, let second):
+            switch lang {
+            case .en: return "\(shortcutName(second, lang: lang)) duplicates \(shortcutName(first, lang: lang)). Choose a different shortcut."
+            case .zhHans: return "\(shortcutName(second, lang: lang))与\(shortcutName(first, lang: lang))重复，请选择其他快捷键。"
+            }
+        }
+    }
+
+    static func shortcutRuntimeMessage(_ error: Error, lang: AppLanguage = .current) -> String {
+        guard let error = error as? ShortcutRuntimeError else {
+            switch lang {
+            case .en: return "The shortcut settings could not be updated."
+            case .zhHans: return "无法更新快捷键设置。"
+            }
+        }
+
+        switch error {
+        case .launchRegistrationFailed(let failures):
+            let message: String
+            switch lang {
+            case .en: message = "Some configured shortcuts could not be registered; they remain saved but inactive."
+            case .zhHans: message = "部分已配置的快捷键未能注册；设置仍已保存，但当前未生效。"
+            }
+            return appendRollbackWarning(message, failures: failures, lang: lang)
+        case .validationFailed(let validation, let restorationFailures):
+            return appendRollbackWarning(
+                shortcutValidationMessage(validation, lang: lang),
+                failures: restorationFailures,
+                lang: lang
+            )
+        case .unregisterFailed(let action, let status, let rollbackFailures):
+            let message: String
+            switch lang {
+            case .en: message = "Could not pause \(shortcutName(action, lang: lang)) (OSStatus \(status))."
+            case .zhHans: message = "无法暂时停用\(shortcutName(action, lang: lang))（OSStatus \(status)）。"
+            }
+            return appendRollbackWarning(message, failures: rollbackFailures, lang: lang)
+        case .registrationFailed(let action, let status, let rollbackFailures):
+            let message: String
+            if rollbackFailures.isEmpty {
+                switch lang {
+                case .en: message = "Could not register \(shortcutName(action, lang: lang)) (OSStatus \(status)); previous shortcuts were restored."
+                case .zhHans: message = "无法注册\(shortcutName(action, lang: lang))（OSStatus \(status)）；已恢复原有快捷键。"
+                }
+            } else {
+                switch lang {
+                case .en: message = "Could not register \(shortcutName(action, lang: lang)) (OSStatus \(status)). Rollback also failed."
+                case .zhHans: message = "无法注册\(shortcutName(action, lang: lang))（OSStatus \(status)），回滚也失败。"
+                }
+            }
+            return appendRollbackWarning(message, failures: rollbackFailures, lang: lang)
+        case .restorationFailed(let failures):
+            let message: String
+            switch lang {
+            case .en: message = "One or more existing shortcuts could not be restored."
+            case .zhHans: message = "一个或多个原有快捷键未能恢复。"
+            }
+            return appendRollbackWarning(message, failures: failures, lang: lang)
+        }
+    }
+
+    private static func appendRollbackWarning(
+        _ message: String,
+        failures: [ShortcutRegistrationFailure],
+        lang: AppLanguage
+    ) -> String {
+        guard !failures.isEmpty else { return message }
+        let statuses = failures.map { "\(shortcutName($0.action, lang: lang)): \($0.status)" }.joined(separator: ", ")
+        switch lang {
+        case .en: return "\(message) Some shortcuts may not match the saved settings (OSStatus: \(statuses))."
+        case .zhHans: return "\(message) 部分快捷键可能与已保存设置不一致（OSStatus：\(statuses)）。"
+        }
+    }
 }

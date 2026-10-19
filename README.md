@@ -29,7 +29,7 @@ nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
 
 > **Note**: This starts `clipline` in the background for the current session. It does not automatically register a login item or guarantee launch on system startup.
 
-Press `⌃X` (`Control + X`) to capture a region, then press `P` to hang it on the top clothesline.
+Open the ClipLine menu bar menu → **Keyboard Shortcuts** to view or edit all global shortcuts. Factory defaults: `⌃X` captures a region, `⌘⇧X` is the secondary capture shortcut, and `⌃⌘V` pins the clipboard image.
 
 ### Update & Reinstall
 
@@ -63,7 +63,7 @@ make uninstall
 
 ### 1. Capture and adjust crop in place
 
-Press `⌃X` and drag to select a region. The screenshot stays pinned at the exact screen coordinates you selected.
+Use the configured capture shortcut (factory default `⌃X`) and drag to select a region. The screenshot stays pinned at the exact screen coordinates you selected.
 
 Before moving the pin or selecting a drawing tool (at `100%` zoom), drag any of the 8 handles or 4 edges to expand or shrink the crop against the original full-screen frame.
 
@@ -88,16 +88,23 @@ Press `P` (or click the clothespin icon) to park the current pin on the clothesl
 
 ### 4. CLI triggers
 
-When the daemon is running, you can trigger it from a terminal or script (use the full path `~/.local/bin/clipline` unless `~/.local/bin` is in your `PATH`):
+Use the full path `~/.local/bin/clipline` unless `~/.local/bin` is in your `PATH`:
 
 ```bash
 ~/.local/bin/clipline --capture     # start interactive region capture
 ~/.local/bin/clipline --clipboard   # pin current clipboard image
+~/.local/bin/clipline --settings    # open shortcut settings (starts the daemon if needed)
+~/.local/bin/clipline --shortcuts   # print current global shortcuts as JSON
 ```
+
+The capture and clipboard commands trigger a running daemon. Shortcut settings persist in the `io.github.clipline` UserDefaults suite.
+Carbon's exclusive registration detects conflicts with other exclusive Carbon hotkeys, but cannot detect every macOS, system, or app shortcut. If a binding does not work in a particular app, choose another one.
 
 ## Shortcuts
 
-| Shortcut | Context | Action |
+The table lists factory defaults; use **Keyboard Shortcuts** or `clipline --shortcuts` for your current bindings.
+
+| Factory default | Context | Action |
 | :--- | :--- | :--- |
 | `⌃X` | Global | Capture region |
 | `⌘⇧X` | Global | Capture region (secondary shortcut) |
@@ -146,7 +153,7 @@ export CLIP_LINE_TRANSLATE_URL="https://www.deepl.com/translator#en/zh/{text}"
 
 ```bash
 make build      # compile release binary to ./build/clipline
-make test       # run 91 unit & AppKit checks (uses isolated pasteboard and temp directory)
+make test       # run unit & AppKit checks (uses isolated shortcut settings, pasteboard, and temp directory)
 make test-install # check scoped uninstall and reinstall in an isolated directory
 make uninstall  # stop daemon and remove ~/.local/bin/clipline
 make clean      # remove ./build

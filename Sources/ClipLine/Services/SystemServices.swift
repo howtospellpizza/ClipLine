@@ -49,6 +49,12 @@ enum SingleInstanceLock {
 }
 
 enum NotificationChannels {
+    static let settingsChannels = ["io.github.clipline.settings"]
+
+    static func settingsAcknowledgementChannel(for requestID: String) -> String {
+        "io.github.clipline.settings.ack.\(requestID)"
+    }
+
     static var translateChannels: [String] {
         var list = ["io.github.clipline.translate"]
         if let extra = ProcessInfo.processInfo.environment["CLIP_LINE_TRANSLATE_CHANNEL"]?
@@ -65,6 +71,21 @@ enum NotificationChannels {
             list.append(extra)
         }
         return list
+    }
+}
+
+enum SettingsRequestRetry {
+    static func send(
+        maxAttempts: Int,
+        post: () -> Void,
+        waitForAcknowledgement: () -> Bool
+    ) -> Bool {
+        guard maxAttempts > 0 else { return false }
+        for _ in 0..<maxAttempts {
+            post()
+            if waitForAcknowledgement() { return true }
+        }
+        return false
     }
 }
 

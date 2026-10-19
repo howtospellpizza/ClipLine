@@ -29,7 +29,7 @@ nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
 
 > **注意**：该命令会在当前会话后台启动 `clipline`，不会自动注册登录项，亦不保证开机自启。
 
-按 `⌃X`（`Control + X`）框选截图，再按 `P` 即可用小木夹将贴图挂到屏幕顶部的晾衣绳上。
+打开 ClipLine 菜单栏菜单 → **键盘快捷键**，即可查看或编辑全部全局快捷键。出厂默认值：`⌃X` 框选截图，`⌘⇧X` 为备用截图快捷键，`⌃⌘V` 将剪贴板图片贴到屏幕上。
 
 ### 更新与重新安装
 
@@ -63,7 +63,7 @@ make uninstall
 
 ### 1. 原地贴图与裁剪微调
 
-按 `⌃X` 框选区域后，贴图会直接停留在所选的屏幕坐标处。
+使用已配置的截图快捷键（出厂默认值为 `⌃X`）框选区域后，贴图会直接停留在所选的屏幕坐标处。
 
 在移动窗口或选择标注工具前（`100%` 缩放比例下），拖拽四周的 8 个圆点或 4 条边，可基于原始全屏画面继续放大或缩小裁剪范围。
 
@@ -88,16 +88,23 @@ make uninstall
 
 ### 4. 命令行触发
 
-守护进程运行时，也可通过终端或脚本触发（除非已将 `~/.local/bin` 加入 `PATH`，请使用完整路径 `~/.local/bin/clipline`）：
+除非已将 `~/.local/bin` 加入 `PATH`，请使用完整路径 `~/.local/bin/clipline`：
 
 ```bash
 ~/.local/bin/clipline --capture     # 启动框选截图
 ~/.local/bin/clipline --clipboard   # 将剪贴板中的图片贴到屏幕上
+~/.local/bin/clipline --settings    # 打开快捷键设置（必要时启动守护进程）
+~/.local/bin/clipline --shortcuts   # 以 JSON 输出当前全局快捷键
 ```
+
+截图与剪贴板命令会触发正在运行的守护进程。快捷键设置保存在 `io.github.clipline` UserDefaults 套件中。
+Carbon 独占注册只能检测其他使用独占 Carbon 注册的快捷键冲突，无法识别所有 macOS、系统或应用快捷键。如果某个快捷键在特定应用中不起作用，请改用其他组合。
 
 ## 快捷键
 
-| 快捷键 | 场景 | 功能 |
+下表列出出厂默认值；请在**键盘快捷键**设置中查看当前绑定，或运行 `clipline --shortcuts`。
+
+| 出厂默认值 | 场景 | 功能 |
 | :--- | :--- | :--- |
 | `⌃X` | 全局 | 框选截图 |
 | `⌘⇧X` | 全局 | 框选截图（备用快捷键） |
@@ -146,7 +153,7 @@ export CLIP_LINE_TRANSLATE_URL="https://www.deepl.com/translator#en/zh/{text}"
 
 ```bash
 make build      # 编译 Release 二进制文件到 ./build/clipline
-make test       # 运行 91 项单元与 AppKit 回归检查（使用独立剪贴板与临时目录）
+make test       # 运行单元与 AppKit 回归检查（使用独立快捷键设置、剪贴板与临时目录）
 make test-install # Check scoped uninstall and reinstall in an isolated directory
 make uninstall  # 停止守护进程并移除 ~/.local/bin/clipline
 make clean      # 清理 ./build
