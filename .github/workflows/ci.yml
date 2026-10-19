@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check Swift toolchain
+        run: swiftc --version
+
+      - name: Build release binary
+        run: make build
+
+      - name: Run unit and AppKit regression tests
+        run: make test
+
+      - name: Run isolated install and uninstall smoke tests
+        run: make test-install

@@ -1,5 +1,8 @@
 # ClipLine
 
+[![CI](https://github.com/howtospellpizza/ClipLine/actions/workflows/ci.yml/badge.svg)](https://github.com/howtospellpizza/ClipLine/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 macOS 原生截图、标注与顶部“晾衣绳”贴图工具。
 
 [English](README.md)

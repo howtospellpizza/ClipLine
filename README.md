@@ -1,5 +1,8 @@
 # ClipLine
 
+[![CI](https://github.com/howtospellpizza/ClipLine/actions/workflows/ci.yml/badge.svg)](https://github.com/howtospellpizza/ClipLine/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Capture screenshots, annotate them, and clip them to a floating clothesline at the top of your screen.
 
 [简体中文](README.zh-CN.md)
