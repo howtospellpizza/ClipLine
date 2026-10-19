@@ -141,35 +141,88 @@ enum ClipboardHelper {
         return pasteboard.writeObjects(items)
     }
 
+    static func copyStitchedImage(_ images: [NSImage], pasteboard: NSPasteboard = .general, tempDir: String? = nil) -> Bool {
+        guard !images.isEmpty else { return false }
+        let dir = tempDir ?? Self.tempDir
+        cleanupStaleTempFiles(in: dir)
+
+        let stitched = stitchImagesGrid(images, gap: 0)
+        guard let png = pngData(from: stitched) else {
+            return false
+        }
+        let fileURL = uniqueTempFileURL(prefix: "ClipLine_Stitched", tempDir: dir)
+        let wroteFile = (try? png.write(to: fileURL, options: .atomic)) != nil
+
+        let item = NSPasteboardItem()
+        item.setData(png, forType: .png)
+        if let tiff = stitched.tiffRepresentation {
+            item.setData(tiff, forType: .tiff)
+        }
+        if wroteFile {
+            item.setString(fileURL.absoluteString, forType: .fileURL)
+        }
+        pasteboard.clearContents()
+        return pasteboard.writeObjects([item])
+    }
+
     static func pngData(from image: NSImage) -> Data? {
         guard let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff) else { return nil }
         return rep.representation(using: .png, properties: [:])
     }
 
-    static func stitchImagesGrid(_ images: [NSImage]) -> NSImage {
+    static func stitchImagesGrid(_ images: [NSImage], gap: CGFloat = 0) -> NSImage {
         guard images.count > 1 else { return images.first ?? NSImage() }
-        let gap: CGFloat = 12
-        let maxW = images.map { $0.size.width }.max() ?? 400
-        let totalH = images.map { $0.size.height }.reduce(0, +) + gap * CGFloat(images.count - 1)
+        let maxW = max(1, images.map { $0.size.width }.max() ?? 400)
+        let totalH = max(1, images.map { $0.size.height }.reduce(0, +) + gap * CGFloat(images.count - 1))
+
+        // Preserve maximum Retina backing scale factor across all input images so stitched output is never blurry
+        let scaleFactor: CGFloat = images.reduce(1.0) { acc, img in
+            let maxRepScale = img.representations.reduce(1.0) { repMax, rep in
+                guard img.size.width > 0, rep.pixelsWide > 0 else { return repMax }
+                return max(repMax, CGFloat(rep.pixelsWide) / img.size.width)
+            }
+            return max(acc, maxRepScale)
+        }
 
         let targetSize = NSSize(width: maxW, height: totalH)
-        let result = NSImage(size: targetSize, flipped: true) { _ in
-            var currentY: CGFloat = 0
-            for img in images {
-                let xOffset = (maxW - img.size.width) / 2
-                img.draw(
-                    in: NSRect(x: xOffset, y: currentY, width: img.size.width, height: img.size.height),
-                    from: .zero,
-                    operation: .sourceOver,
-                    fraction: 1.0,
-                    respectFlipped: true,
-                    hints: nil
-                )
-                currentY += img.size.height + gap
-            }
-            return true
+        let pixelW = max(1, Int((maxW * scaleFactor).rounded()))
+        let pixelH = max(1, Int((totalH * scaleFactor).rounded()))
+
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelW,
+            pixelsHigh: pixelH,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return images.first ?? NSImage()
         }
+        rep.size = targetSize
+
+        NSGraphicsContext.saveGraphicsState()
+        if let gfxCtx = NSGraphicsContext(bitmapImageRep: rep) {
+            NSGraphicsContext.current = gfxCtx
+            gfxCtx.imageInterpolation = .high
+            // AppKit bitmap context has origin at bottom-left; draw from top to bottom seamlessly
+            var currentTopY = totalH
+            for img in images {
+                currentTopY -= img.size.height
+                let xOffset = ((maxW - img.size.width) / 2.0).rounded()
+                let destRect = NSRect(x: xOffset, y: currentTopY, width: img.size.width, height: img.size.height)
+                img.draw(in: destRect, from: .zero, operation: .sourceOver, fraction: 1.0)
+                currentTopY -= gap
+            }
+        }
+        NSGraphicsContext.restoreGraphicsState()
+
+        let result = NSImage(size: targetSize)
+        result.addRepresentation(rep)
         return result
     }
 }

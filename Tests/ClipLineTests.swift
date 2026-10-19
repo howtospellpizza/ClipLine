@@ -809,9 +809,48 @@ func runAllTests() -> Int32 {
 
     let stitched = ClipboardHelper.stitchImagesGrid([img1, img2])
     t.check(
-        stitched.size == NSSize(width: 240, height: 152),
-        "stitchImagesGrid computes exact combined canvas size (maxW = 240, sumH+gap = 152)",
+        stitched.size == NSSize(width: 240, height: 140),
+        "stitchImagesGrid seamlessly stitches vertically with zero gap by default (maxW = 240, sumH = 140)",
         detail: "got \(stitched.size)"
+    )
+
+    // Verify Retina 2x pixel density is preserved through renderCompositeImage and stitchImagesGrid
+    let retinaRep1 = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: 400,
+        pixelsHigh: 120,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    )!
+    retinaRep1.size = NSSize(width: 200, height: 60)
+    let retinaImg1 = NSImage(size: NSSize(width: 200, height: 60))
+    retinaImg1.addRepresentation(retinaRep1)
+
+    let retinaVM = PinSessionViewModel(image: retinaImg1)
+    let compositeRetina = retinaVM.renderCompositeImage()
+    let compositeRep = compositeRetina?.representations.first
+    t.check(
+        compositeRep?.pixelsWide == 400 && compositeRep?.pixelsHigh == 120,
+        "renderCompositeImage preserves exact 2x Retina pixel dimensions (400x120 px for 200x60 pt)"
+    )
+
+    let stitchedRetina = ClipboardHelper.stitchImagesGrid([ compositeRetina!, compositeRetina! ])
+    let stitchedRep = stitchedRetina.representations.first
+    t.check(
+        stitchedRetina.size == NSSize(width: 200, height: 120) &&
+        stitchedRep?.pixelsWide == 400 && stitchedRep?.pixelsHigh == 240,
+        "stitchImagesGrid preserves full 2x Retina pixel resolution (400x240 px for 200x120 pt) without blur"
+    )
+
+    let copiedStitched = ClipboardHelper.copyStitchedImage([img1, img2], pasteboard: testPasteboard, tempDir: testTempDirURL.path)
+    t.check(
+        copiedStitched && (testPasteboard.pasteboardItems?.count == 1),
+        "copyStitchedImage writes 1 combined stitched NSPasteboardItem to pasteboard"
     )
 
     let staleClipURL = testTempDirURL.appendingPathComponent("ClipLine_StaleTest.png")

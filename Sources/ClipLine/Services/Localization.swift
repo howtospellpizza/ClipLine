@@ -246,6 +246,34 @@ enum L10n {
         }
     }
 
+    static var clotheslineCopyTooltip: String {
+        switch AppLanguage.current {
+        case .en: return "Copy selected as separate images"
+        case .zhHans: return "将选中的图片作为多张独立图片复制到剪贴板"
+        }
+    }
+
+    static var clotheslineStitchLabel: String {
+        switch AppLanguage.current {
+        case .en: return "Stitch"
+        case .zhHans: return "拼长图"
+        }
+    }
+
+    static var clotheslineStitchTooltip: String {
+        switch AppLanguage.current {
+        case .en: return "Seamlessly stitch selected images vertically into one high-res image and copy"
+        case .zhHans: return "将选中的多张图片无缝纵向拼接为一张高清长图并复制"
+        }
+    }
+
+    static func toastStitchedPhotos(_ count: Int, lang: AppLanguage = .current) -> String {
+        switch lang {
+        case .en: return "Stitched \(count) images into 1 and copied"
+        case .zhHans: return "已将 \(count) 张图无缝拼成 1 张并复制"
+        }
+    }
+
     static func clotheslineSelectAllLabel(allSelected: Bool, lang: AppLanguage = .current) -> String {
         switch lang {
         case .en: return allSelected ? "Deselect" : "Select All"

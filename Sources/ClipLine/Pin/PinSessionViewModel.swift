@@ -358,12 +358,38 @@ final class PinSessionViewModel: ObservableObject {
     func renderCompositeImage() -> NSImage? {
         let targetSize = baseSize
         guard targetSize.width >= 1, targetSize.height >= 1 else { return nil }
-        let result = NSImage(size: targetSize)
-        result.lockFocus()
-        guard let ctx = NSGraphicsContext.current?.cgContext else {
-            result.unlockFocus()
+
+        // Preserve exact Retina backing resolution from baseImage representations so exported/stitched images stay razor-sharp
+        let scaleFactor: CGFloat = baseImage.representations.reduce(1.0) { acc, rep in
+            guard targetSize.width > 0, rep.pixelsWide > 0 else { return acc }
+            return max(acc, CGFloat(rep.pixelsWide) / targetSize.width)
+        }
+        let pixelW = max(1, Int((targetSize.width * scaleFactor).rounded()))
+        let pixelH = max(1, Int((targetSize.height * scaleFactor).rounded()))
+
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelW,
+            pixelsHigh: pixelH,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
             return nil
         }
+        rep.size = targetSize
+
+        NSGraphicsContext.saveGraphicsState()
+        guard let gfxCtx = NSGraphicsContext(bitmapImageRep: rep) else {
+            NSGraphicsContext.restoreGraphicsState()
+            return nil
+        }
+        NSGraphicsContext.current = gfxCtx
+        let ctx = gfxCtx.cgContext
 
         baseImage.draw(in: NSRect(origin: .zero, size: targetSize))
 
@@ -376,7 +402,10 @@ final class PinSessionViewModel: ObservableObject {
         }
 
         ctx.restoreGState()
-        result.unlockFocus()
+        NSGraphicsContext.restoreGraphicsState()
+
+        let result = NSImage(size: targetSize)
+        result.addRepresentation(rep)
         return result
     }
 

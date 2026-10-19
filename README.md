@@ -34,7 +34,7 @@ Before moving the pin or selecting a drawing tool (at `100%` zoom), drag any of 
 
 Press `P` (or click the clothespin icon) to park the current pin on the clothesline at the top of your screen:
 
-- **Batch copy & save**: Click multiple thumbnails on the line and click **Copy** (or **Save**) to copy or export all selected images at once as separate images.
+- **Batch copy, stitch & save**: Click multiple thumbnails on the line and click **Copy** (or **Save**) to copy or export them as separate images, or click **Stitch** to seamlessly join them vertically into a single Retina-sharp image.
 - **Drag & drop**: Drag any thumbnail directly into Slack, a browser, or Finder.
 - **Unclip**: Double-click any thumbnail to return it to the canvas.
 
@@ -106,7 +106,7 @@ export CLIP_LINE_TRANSLATE_URL="https://www.deepl.com/translator#en/zh/{text}"
 
 ```bash
 make build      # compile release binary to ./build/clipline
-make test       # run 88 unit & AppKit checks (uses isolated pasteboard and temp directory)
+make test       # run 91 unit & AppKit checks (uses isolated pasteboard and temp directory)
 make uninstall  # stop daemon and remove ~/.local/bin/clipline
 make clean      # remove ./build
 ```

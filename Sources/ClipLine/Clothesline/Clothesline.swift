@@ -105,6 +105,16 @@ final class ClotheslineManager: ObservableObject {
         }
     }
 
+    func stitchSelectedToClipboard() {
+        let chosen = selectedItems
+        guard !chosen.isEmpty else {
+            showToast(L10n.toastSelectPhotosToCopy)
+            return
+        }
+        let ok = ClipboardHelper.copyStitchedImage(chosen.map(\.compositeImage), pasteboard: pasteboardProvider(), tempDir: tempDirOverride)
+        showToast(ok ? L10n.toastStitchedPhotos(chosen.count) : L10n.toastCopyFailed)
+    }
+
     func saveSelectedToFolder() {
         let chosen = selectedItems
         guard !chosen.isEmpty else {
@@ -187,7 +197,7 @@ final class ClotheslineManager: ObservableObject {
         let screen = NSScreen.main ?? NSScreen.screens.first
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
 
-        let width = min(max(CGFloat(items.count) * 124 + 225, 420), visible.width - 40)
+        let width = min(max(CGFloat(items.count) * 124 + 265, 450), visible.width - 40)
         let height: CGFloat = 148
         let origin = CGPoint(
             x: visible.midX - width / 2,
@@ -327,21 +337,42 @@ struct ClotheslineBarView: View {
                         .zIndex(2)
 
                     VStack(spacing: 5) {
-                        Button(action: { manager.syncSelectedToClipboard(silent: false) }) {
-                            HStack(spacing: 3) {
-                                Image(systemName: "doc.on.doc.fill")
-                                    .font(.system(size: 10, weight: .bold))
-                                Text(L10n.clotheslineCopyCountLabel(manager.selectedItems.count))
-                                    .font(.system(size: 11, weight: .bold))
+                        HStack(spacing: 5) {
+                            Button(action: { manager.syncSelectedToClipboard(silent: false) }) {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "doc.on.doc.fill")
+                                        .font(.system(size: 10, weight: .bold))
+                                    Text(L10n.clotheslineCopyCountLabel(manager.selectedItems.count))
+                                        .font(.system(size: 11, weight: .bold))
+                                }
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 4)
+                                .background(manager.selectedItems.isEmpty ? Color.gray.opacity(0.4) : Color.accentColor)
+                                .foregroundColor(.white)
+                                .clipShape(Capsule())
                             }
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 4)
-                            .background(manager.selectedItems.isEmpty ? Color.gray.opacity(0.4) : Color.accentColor)
-                            .foregroundColor(.white)
-                            .clipShape(Capsule())
+                            .buttonStyle(.plain)
+                            .disabled(manager.selectedItems.isEmpty)
+                            .help(L10n.clotheslineCopyTooltip)
+
+                            if manager.selectedItems.count > 1 {
+                                Button(action: { manager.stitchSelectedToClipboard() }) {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "rectangle.grid.1x2.fill")
+                                            .font(.system(size: 10, weight: .bold))
+                                        Text(L10n.clotheslineStitchLabel)
+                                            .font(.system(size: 11, weight: .bold))
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color(red: 0.78, green: 0.54, blue: 0.28))
+                                    .foregroundColor(.white)
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .help(L10n.clotheslineStitchTooltip)
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .disabled(manager.selectedItems.isEmpty)
 
                         HStack(spacing: 6) {
                             Button(action: { manager.toggleSelectAll() }) {
