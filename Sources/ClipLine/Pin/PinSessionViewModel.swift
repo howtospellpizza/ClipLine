@@ -97,10 +97,70 @@ final class PinSessionViewModel: ObservableObject {
         switch tool {
         case .mosaic:
             return strokePreset.mosaicBrushWidth
+        case .highlighter:
+            return strokePreset.highlighterBrushWidth
+        case .counter:
+            return strokePreset.counterBadgeDiameter
         case .text:
             return strokePreset.textFontSize
         case .rect, .arrow, .pen:
             return strokePreset.strokeLineWidth
+        }
+    }
+
+    var nextCounterLabel: String {
+        let count = annotations.filter { $0.tool == .counter }.count
+        return "\(count + 1)"
+    }
+
+    static func constrainedNormalizedEndPoint(
+        for tool: PinAnnotation.Tool,
+        start: CGPoint,
+        rawEnd: CGPoint,
+        canvasSize: NSSize
+    ) -> CGPoint {
+        let w = max(1.0, canvasSize.width)
+        let h = max(1.0, canvasSize.height)
+        let dxPt = (rawEnd.x - start.x) * w
+        let dyPt = (rawEnd.y - start.y) * h
+
+        switch tool {
+        case .rect:
+            let side = max(abs(dxPt), abs(dyPt))
+            let sx: CGFloat = dxPt >= 0 ? 1.0 : -1.0
+            let sy: CGFloat = dyPt >= 0 ? 1.0 : -1.0
+            let maxSideX = sx >= 0 ? (1.0 - start.x) * w : start.x * w
+            let maxSideY = sy >= 0 ? (1.0 - start.y) * h : start.y * h
+            let clampedSide = min(side, min(maxSideX, maxSideY))
+            return CGPoint(
+                x: max(0.0, min(1.0, start.x + (sx * clampedSide) / w)),
+                y: max(0.0, min(1.0, start.y + (sy * clampedSide) / h))
+            )
+        case .arrow:
+            let dist = hypot(dxPt, dyPt)
+            guard dist > 0.001 else { return rawEnd }
+            let step = CGFloat.pi / 4.0
+            let snappedAngle = (atan2(dyPt, dxPt) / step).rounded() * step
+            let ux = cos(snappedAngle)
+            let uy = sin(snappedAngle)
+            var maxDist = dist
+            if ux > 0.0001 {
+                maxDist = min(maxDist, ((1.0 - start.x) * w) / ux)
+            } else if ux < -0.0001 {
+                maxDist = min(maxDist, (start.x * w) / (-ux))
+            }
+            if uy > 0.0001 {
+                maxDist = min(maxDist, ((1.0 - start.y) * h) / uy)
+            } else if uy < -0.0001 {
+                maxDist = min(maxDist, (start.y * h) / (-uy))
+            }
+            let finalDist = max(0.0, maxDist)
+            return CGPoint(
+                x: max(0.0, min(1.0, start.x + (ux * finalDist) / w)),
+                y: max(0.0, min(1.0, start.y + (uy * finalDist) / h))
+            )
+        default:
+            return rawEnd
         }
     }
 
@@ -143,6 +203,9 @@ final class PinSessionViewModel: ObservableObject {
     func updateToolbarPanelPosition() {
         guard let imgPanel = hostingPanel, let tbPanel = toolbarPanel else { return }
         if !showToolbar || !imgPanel.isVisible {
+            if imgPanel.childWindows?.contains(tbPanel) == true {
+                imgPanel.removeChildWindow(tbPanel)
+            }
             tbPanel.orderOut(nil)
             return
         }
@@ -181,13 +244,38 @@ final class PinSessionViewModel: ObservableObject {
         // Place toolbar 12pt below the bottom border of the image (leaving plenty of room for bottom handles!)
         var tbY = round(imageMinY - tbSize.height - 12)
         if tbY < visible.minY + 6 {
-            // If image is at the very bottom of the screen, place toolbar 12pt above the top border of the image
-            tbY = round(imageMaxY + 12)
+            // If image is at the very bottom of the screen, try 12pt above the top border of the image
+            let aboveTopY = round(imageMaxY + 12)
+            if aboveTopY + tbSize.height <= visible.maxY - 6 {
+                tbY = aboveTopY
+            } else {
+                // Full-screen or tall pin: float the toolbar cleanly inside the bottom of the visible screen,
+                // or near the top if an active inline text editor overlaps the bottom toolbar zone.
+                let bottomInsideY = round(visible.minY + 16)
+                let bottomCandidate = NSRect(x: tbX, y: bottomInsideY, width: tbSize.width, height: tbSize.height)
+                if let cv = imgPanel.canvasView,
+                   let fieldRect = cv.pendingFieldHitRect() {
+                    let fieldInWindow = cv.convert(fieldRect, to: nil)
+                    let fieldOnScreen = imgPanel.convertToScreen(fieldInWindow).insetBy(dx: -8, dy: -8)
+                    if bottomCandidate.intersects(fieldOnScreen) {
+                        tbY = round(visible.maxY - tbSize.height - 16)
+                    } else {
+                        tbY = bottomInsideY
+                    }
+                } else {
+                    tbY = bottomInsideY
+                }
+            }
         }
 
         tbPanel.setFrameOrigin(NSPoint(x: tbX, y: tbY))
+        if imgPanel.childWindows?.contains(tbPanel) != true {
+            imgPanel.addChildWindow(tbPanel, ordered: .above)
+        }
         if !tbPanel.isVisible {
             tbPanel.orderFrontRegardless()
+        } else {
+            tbPanel.order(.above, relativeTo: imgPanel.windowNumber)
         }
     }
 
@@ -309,6 +397,7 @@ final class PinSessionViewModel: ObservableObject {
             cv.window?.invalidateCursorRects(for: cv)
             cv.needsDisplay = true
         }
+        updateToolbarPanelPosition()
     }
 
     func commitPendingText() {
@@ -357,6 +446,7 @@ final class PinSessionViewModel: ObservableObject {
             cv.window?.invalidateCursorRects(for: cv)
             cv.needsDisplay = true
         }
+        updateToolbarPanelPosition()
     }
 
     func renderCompositeImage() -> NSImage? {
@@ -468,6 +558,59 @@ final class PinSessionViewModel: ObservableObject {
                 ctx.addLine(to: p)
             }
             ctx.strokePath()
+
+        case .highlighter:
+            guard pts.count >= 2 else { break }
+            ctx.saveGState()
+            ctx.setBlendMode(.multiply)
+            ctx.setStrokeColor(item.color.withAlphaComponent(0.38).cgColor)
+            ctx.setLineWidth(lw)
+            ctx.setLineCap(.butt)
+            ctx.setLineJoin(.round)
+            ctx.move(to: pts[0])
+            for p in pts.dropFirst() {
+                ctx.addLine(to: p)
+            }
+            ctx.strokePath()
+            ctx.restoreGState()
+
+        case .counter:
+            let center = pts[0]
+            let diameter = max(18.0, item.lineWidth) * scaleMultiplier
+            let radius = diameter / 2.0
+            let badgeRect = CGRect(x: center.x - radius, y: center.y - radius, width: diameter, height: diameter)
+
+            ctx.saveGState()
+            ctx.setShadow(offset: CGSize(width: 0, height: 1.5), blur: 3.5, color: NSColor.black.withAlphaComponent(0.36).cgColor)
+            ctx.setFillColor(item.color.cgColor)
+            ctx.fillEllipse(in: badgeRect)
+            ctx.restoreGState()
+
+            ctx.saveGState()
+            ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.95).cgColor)
+            ctx.setLineWidth(max(1.8, 2.0 * scaleMultiplier))
+            ctx.strokeEllipse(in: badgeRect)
+            ctx.restoreGState()
+
+            let label = item.text.isEmpty ? "1" : item.text
+            let fontSize = round(diameter * (label.count >= 2 ? 0.48 : 0.56))
+            let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .bold)
+            let rgb = item.color.usingColorSpace(.sRGB) ?? item.color
+            let luma = 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent
+            let fgColor: NSColor = luma > 0.72 ? .black : .white
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: fgColor
+            ]
+            let textSize = (label as NSString).size(withAttributes: attrs)
+            ctx.saveGState()
+            ctx.translateBy(x: center.x, y: center.y)
+            ctx.scaleBy(x: 1.0, y: -1.0)
+            (label as NSString).draw(
+                at: CGPoint(x: -textSize.width / 2.0, y: -textSize.height / 2.0),
+                withAttributes: attrs
+            )
+            ctx.restoreGState()
 
         case .mosaic:
             guard pts.count >= 2 else { break }
@@ -633,7 +776,7 @@ final class PinSessionViewModel: ObservableObject {
     private static var configuredDaemonName: String {
         let envName = ProcessInfo.processInfo.environment["CLIP_LINE_TRANSLATE_DAEMON"]?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return envName.isEmpty ? "fy-daemon" : envName
+        return envName.isEmpty ? "gloss-daemon" : envName
     }
 
     private static func isTranslationDaemonRunning() -> Bool {

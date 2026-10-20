@@ -348,6 +348,9 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
         let closeClosure: () -> Void = { [weak self, weak vm, weak panel, weak tbPanel] in
             vm?.isClosed = true
             vm?.cancelActiveOCR()
+            if let panel, let tbPanel, panel.childWindows?.contains(tbPanel) == true {
+                panel.removeChildWindow(tbPanel)
+            }
             tbPanel?.orderOut(nil)
             panel?.orderOut(nil)
             self?.activeToolbars.removeValue(forKey: id)

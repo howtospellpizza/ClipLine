@@ -91,11 +91,14 @@ make uninstall
 
 ## Usage
 
-### 1. Capture and adjust crop in place
+### 1. Capture, window snap, and adjust crop in place
 
-Use the configured capture shortcut (factory default `⌃X`) and drag to select a region. The screenshot stays pinned at the exact screen coordinates you selected.
+Use the configured capture shortcut (factory default `⌃X`):
+- **Single-click window snap**: Hover over any visible window (including Stage Manager thumbnails) to preview its bounds, then **single-click** to capture that exact window in one step.
+- **Freehand drag**: Click and drag anywhere (including on the desktop) to select a custom region.
+- **Full-screen capture**: Press `Space` or `⌘A` while in the capture overlay to capture the entire screen immediately.
 
-Before moving the pin or selecting a drawing tool (at `100%` zoom), drag any of the 8 handles or 4 edges to expand or shrink the crop against the original full-screen frame.
+The screenshot stays pinned at the exact screen coordinates you selected. Before moving the pin or selecting a drawing tool (at `100%` zoom), drag any of the 8 handles or 4 edges to expand or shrink the crop against the original full-screen frame.
 
 ### 2. Hang multiple pins on the clothesline
 
@@ -107,11 +110,11 @@ Press `P` (or click the clothespin icon) to park the current pin on the clothesl
 
 ### 3. Annotate, OCR, and translate
 
-- **Tools**: Rectangle, arrow, freehand pen, text, and mosaic (`CIPixellate`), with 3 stroke sizes (`S` / `M` / `L` or `细` / `中` / `粗`) and 6 colors.
+- **Tools**: Rectangle (hold `Shift` for 1:1 square), arrow (hold `Shift` to snap `45°` angles), freehand pen, translucent highlighter (`.multiply` blend), auto-incrementing step counter (`① ② ③…`, draggable and recolorable), text, and mosaic (`CIPixellate`), with 3 stroke sizes (`S` / `M` / `L` or `细` / `中` / `粗`) and 6 colors.
 - **Text**: Supports transparent, black pill, or white pill backgrounds. Drag anywhere inside the text box to move it, or double-click committed text to edit it in place.
 - **OCR (`O`)**: Recognizes Simplified Chinese, Traditional Chinese, and English offline via macOS `Vision` and copies the text to your clipboard.
 - **Translate (`T`)**: Runs OCR on the composited image and routes text to:
-  1. Local translation daemon (`fy-daemon`, or custom name via `CLIP_LINE_TRANSLATE_DAEMON`)
+  1. Local translation daemon (`gloss-daemon`, or custom name via `CLIP_LINE_TRANSLATE_DAEMON`)
   2. Custom URL template (`CLIP_LINE_TRANSLATE_URL`)
   3. macOS system Translation service
   4. Browser translation (prompts once per destination domain before opening)
@@ -170,7 +173,7 @@ On first capture, macOS prompts for **Screen Recording** permission. The prompt 
 | `CLIP_LINE_TRANSLATE_TARGET` | `en` (EN UI) / `zh-CN` (ZH UI) | Target language code (`tl`) for built-in web translation fallback |
 | `CLIP_LINE_TRANSLATE_URL` | Unset | Custom HTTPS (or `localhost` HTTP) URL template using `{text}` placeholder |
 | `TranslateURLTemplate` (`NSGlobalDomain`) | Unset | Persistent `defaults write` equivalent of `CLIP_LINE_TRANSLATE_URL` |
-| `CLIP_LINE_TRANSLATE_DAEMON` | `fy-daemon` | Process name checked for local translation routing |
+| `CLIP_LINE_TRANSLATE_DAEMON` | `gloss-daemon` | Process name checked for local translation routing |
 | `CLIP_LINE_TRANSLATE_CHANNEL` | `io.github.clipline.translate` | Distributed notification channel for local translation |
 | `CLIP_LINE_CAPTURE_CHANNEL` | `io.github.clipline.capture` | Distributed notification channel for external capture triggers |
 
@@ -194,7 +197,7 @@ make clean      # remove ./build
 
 - **Mosaic is visual obfuscation**: Uses `CoreImage` `CIPixellate` (and falls back to an opaque dark fill if pixelation fails). For sensitive credentials or keys, crop them out or cover them with an opaque pen stroke.
 - **Temporary files**: Writes `ClipLine_*.png` to `$TMPDIR/ClipLine` (`0700`) so file-paste and drag-and-drop work across Finder and chat apps. Files older than 1 hour are removed on daemon startup and on subsequent copy actions.
-- **Local notifications**: When `fy-daemon` is running, OCR text is posted via `DistributedNotificationCenter` within the current macOS user session.
+- **Local notifications**: When `gloss-daemon` is running, OCR text is posted via `DistributedNotificationCenter` within the current macOS user session.
 
 ## License
 

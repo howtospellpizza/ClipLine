@@ -34,8 +34,11 @@ final class ClotheslineManager: ObservableObject {
             vm.showToast(L10n.toastRenderFailedRefusedExport)
             return
         }
-        vm.hostingPanel?.orderOut(nil)
+        if let imgPanel = vm.hostingPanel, let tbPanel = vm.toolbarPanel, imgPanel.childWindows?.contains(tbPanel) == true {
+            imgPanel.removeChildWindow(tbPanel)
+        }
         vm.toolbarPanel?.orderOut(nil)
+        vm.hostingPanel?.orderOut(nil)
 
         let angles: [Double] = [-2.2, 1.8, -1.4, 2.1, -1.8, 1.3]
         let angle = angles[items.count % angles.count]

@@ -37,6 +37,22 @@ enum StrokePreset: String, CaseIterable, Identifiable {
         }
     }
 
+    var highlighterBrushWidth: CGFloat {
+        switch self {
+        case .thin: return 14.0
+        case .medium: return 22.0
+        case .thick: return 32.0
+        }
+    }
+
+    var counterBadgeDiameter: CGFloat {
+        switch self {
+        case .thin: return 22.0
+        case .medium: return 28.0
+        case .thick: return 36.0
+        }
+    }
+
     var mosaicBrushWidth: CGFloat {
         switch self {
         case .thin: return 14.0
@@ -94,6 +110,8 @@ struct PinAnnotation: Identifiable {
         case rect
         case arrow
         case pen
+        case highlighter
+        case counter
         case mosaic
         case text
 
@@ -108,6 +126,8 @@ struct PinAnnotation: Identifiable {
             case .rect: return "rectangle"
             case .arrow: return "arrow.up.right"
             case .pen: return "scribble"
+            case .highlighter: return "highlighter"
+            case .counter: return "1.circle.fill"
             case .mosaic: return "checkerboard.rectangle"
             case .text: return "textformat"
             }

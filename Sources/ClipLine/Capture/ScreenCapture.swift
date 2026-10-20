@@ -81,6 +81,7 @@ final class ScreenCaptureOverlayController {
 
         let frozenImage = NSImage(cgImage: cgScreenshot, size: screen.frame.size)
         let scaleFactor = CGFloat(cgScreenshot.width) / screen.frame.width
+        let candidateWindows = Self.detectVisibleWindowRectsInView(for: screen)
         self.completion = completion
 
         let panel = CaptureOverlayPanel(
@@ -102,6 +103,7 @@ final class ScreenCaptureOverlayController {
             frozenImage: frozenImage,
             cgImage: cgScreenshot,
             scaleFactor: scaleFactor,
+            candidateWindowRects: candidateWindows,
             onFinish: { [weak self] result in
                 self?.finish(with: result)
             }
@@ -124,6 +126,93 @@ final class ScreenCaptureOverlayController {
         let cb = completion
         completion = nil
         cb?(result)
+    }
+
+    nonisolated static func convertCGWindowBoundsToViewRect(
+        cgBounds: CGRect,
+        primaryScreenHeight: CGFloat,
+        targetScreenFrame: NSRect
+    ) -> NSRect? {
+        let globalX = cgBounds.origin.x
+        let globalY = primaryScreenHeight - cgBounds.origin.y - cgBounds.height
+        let globalRect = NSRect(x: globalX, y: globalY, width: cgBounds.width, height: cgBounds.height)
+        let clippedGlobal = globalRect.intersection(targetScreenFrame)
+        guard !clippedGlobal.isEmpty, clippedGlobal.width >= 24, clippedGlobal.height >= 24 else {
+            return nil
+        }
+        return NSRect(
+            x: round(clippedGlobal.origin.x - targetScreenFrame.origin.x),
+            y: round(clippedGlobal.origin.y - targetScreenFrame.origin.y),
+            width: round(clippedGlobal.width),
+            height: round(clippedGlobal.height)
+        )
+    }
+
+    nonisolated static func shouldIncludeWindowForSnap(
+        ownerPID: pid_t,
+        ownPID: pid_t,
+        ownerName: String?,
+        layer: Int,
+        alpha: Double,
+        viewRect: NSRect,
+        screenSize: NSSize
+    ) -> Bool {
+        if ownerPID == ownPID { return false }
+        // Only snap normal application windows (layer 0) and floating utility panels (layer 1...8);
+        // exclude Dock fullscreen backdrop (layer 20), menu bar, notification center, etc.
+        guard layer >= 0 && layer <= 8 else { return false }
+        guard alpha > 0.05 else { return false }
+        let excludedOwners: Set<String> = [
+            "Dock",
+            "Window Server",
+            "Control Center",
+            "Notification Center",
+            "Spotlight",
+            "Wallpaper"
+        ]
+        if let name = ownerName, excludedOwners.contains(name) {
+            return false
+        }
+        return viewRect.width >= 24 && viewRect.height >= 24
+    }
+
+    static func detectVisibleWindowRectsInView(for screen: NSScreen) -> [NSRect] {
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? screen.frame.height
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        guard let infoList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else {
+            return []
+        }
+
+        var rects: [NSRect] = []
+        for entry in infoList {
+            let ownerPID = (entry[kCGWindowOwnerPID as String] as? pid_t) ?? 0
+            let ownerName = entry[kCGWindowOwnerName as String] as? String
+            let layer = (entry[kCGWindowLayer as String] as? Int) ?? 0
+            let alpha = (entry[kCGWindowAlpha as String] as? Double) ?? 1.0
+            guard let boundsDict = entry[kCGWindowBounds as String] as? NSDictionary,
+                  let cgBounds = CGRect(dictionaryRepresentation: boundsDict),
+                  let viewRect = convertCGWindowBoundsToViewRect(
+                      cgBounds: cgBounds,
+                      primaryScreenHeight: primaryHeight,
+                      targetScreenFrame: screen.frame
+                  ),
+                  shouldIncludeWindowForSnap(
+                      ownerPID: ownerPID,
+                      ownPID: ownPID,
+                      ownerName: ownerName,
+                      layer: layer,
+                      alpha: alpha,
+                      viewRect: viewRect,
+                      screenSize: screen.frame.size
+                  ) else {
+                continue
+            }
+            rects.append(viewRect)
+        }
+        return rects
     }
 
     private static var permissionHUDPanel: NSPanel?
@@ -401,6 +490,7 @@ final class PixPinSelectionView: NSView {
     private let frozenImage: NSImage
     private let cgImage: CGImage
     private let scaleFactor: CGFloat
+    let candidateWindowRects: [NSRect]
     private let onFinish: (CaptureSelectionResult?) -> Void
 
     private var mousePos: NSPoint = .zero
@@ -414,12 +504,14 @@ final class PixPinSelectionView: NSView {
         frozenImage: NSImage,
         cgImage: CGImage,
         scaleFactor: CGFloat,
+        candidateWindowRects: [NSRect] = [],
         onFinish: @escaping (CaptureSelectionResult?) -> Void
     ) {
         self.screenOrigin = screenOrigin
         self.frozenImage = frozenImage
         self.cgImage = cgImage
         self.scaleFactor = scaleFactor
+        self.candidateWindowRects = candidateWindowRects
         self.onFinish = onFinish
         super.init(frame: frame)
         let mouseInScreen = NSEvent.mouseLocation
@@ -430,6 +522,13 @@ final class PixPinSelectionView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
     override var isOpaque: Bool { true }
+
+    func hoveredWindowRect(at point: NSPoint) -> NSRect? {
+        for rect in candidateWindowRects where rect.contains(point) {
+            return rect.intersection(bounds)
+        }
+        return nil
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -464,25 +563,21 @@ final class PixPinSelectionView: NSView {
         needsDisplay = true
     }
 
-    override func mouseUp(with event: NSEvent) {
-        guard let s = startDragPos, let e = currentDragPos else {
-            onFinish(nil)
-            return
-        }
-        let rect = normalizedRect(from: s, to: e).intersection(bounds)
-        if rect.isEmpty || rect.width < 24 || rect.height < 24 {
+    private func completeCapture(with rect: NSRect) {
+        let clippedRect = rect.intersection(bounds)
+        if clippedRect.isEmpty || clippedRect.width < 24 || clippedRect.height < 24 {
             startDragPos = nil
             currentDragPos = nil
             needsDisplay = true
             return
         }
-        guard let cropped = Self.cropImage(cgImage: cgImage, viewHeight: bounds.height, scaleFactor: scaleFactor, rect: rect) else {
+        guard let cropped = Self.cropImage(cgImage: cgImage, viewHeight: bounds.height, scaleFactor: scaleFactor, rect: clippedRect) else {
             onFinish(nil)
             return
         }
         let globalRect = NSRect(
-            x: screenOrigin.x + rect.origin.x,
-            y: screenOrigin.y + rect.origin.y,
+            x: screenOrigin.x + clippedRect.origin.x,
+            y: screenOrigin.y + clippedRect.origin.y,
             width: cropped.size.width,
             height: cropped.size.height
         )
@@ -496,6 +591,22 @@ final class PixPinSelectionView: NSView {
         onFinish(res)
     }
 
+    override func mouseUp(with event: NSEvent) {
+        guard let s = startDragPos, let e = currentDragPos else {
+            onFinish(nil)
+            return
+        }
+        let dragDistance = hypot(e.x - s.x, e.y - s.y)
+        let rect: NSRect
+        if dragDistance < 4.0, let snappedWindow = hoveredWindowRect(at: e),
+           snappedWindow.width >= 24, snappedWindow.height >= 24 {
+            rect = snappedWindow
+        } else {
+            rect = normalizedRect(from: s, to: e).intersection(bounds)
+        }
+        completeCapture(with: rect)
+    }
+
     override func rightMouseDown(with event: NSEvent) {
         onFinish(nil)
     }
@@ -503,6 +614,9 @@ final class PixPinSelectionView: NSView {
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { // Esc
             onFinish(nil)
+        } else if !event.isARepeat && (event.keyCode == 49 || (event.keyCode == 0 && event.modifierFlags.contains(.command))) {
+            // Space (49) or Cmd+A (0 with .command) captures the entire screen
+            completeCapture(with: bounds)
         }
     }
 
@@ -537,51 +651,15 @@ final class PixPinSelectionView: NSView {
         ctx.fill(bounds)
         ctx.restoreGState()
 
-        if let s = startDragPos, let e = currentDragPos {
+        if let s = startDragPos, let e = currentDragPos, hypot(e.x - s.x, e.y - s.y) >= 4.0 {
             let sel = normalizedRect(from: s, to: e)
             if sel.width > 1 && sel.height > 1 {
-                frozenImage.draw(in: sel, from: sel, operation: .copy, fraction: 1.0)
-
-                ctx.saveGState()
-                ctx.setStrokeColor(NSColor(calibratedRed: 0.15, green: 0.65, blue: 1.0, alpha: 1.0).cgColor)
-                ctx.setLineWidth(1.8)
-                ctx.stroke(sel)
-
-                let corners = [
-                    NSPoint(x: sel.minX, y: sel.minY),
-                    NSPoint(x: sel.maxX, y: sel.minY),
-                    NSPoint(x: sel.minX, y: sel.maxY),
-                    NSPoint(x: sel.maxX, y: sel.maxY)
-                ]
-                ctx.setFillColor(NSColor.white.cgColor)
-                for c in corners {
-                    let hRect = CGRect(x: c.x - 3.5, y: c.y - 3.5, width: 7, height: 7)
-                    ctx.fillEllipse(in: hRect)
-                    ctx.strokeEllipse(in: hRect)
-                }
-                ctx.restoreGState()
-
-                let dimStr = "\(Int(sel.width)) × \(Int(sel.height))" as NSString
-                let attrs: [NSAttributedString.Key: Any] = [
-                    .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold),
-                    .foregroundColor: NSColor.white
-                ]
-                let strSize = dimStr.size(withAttributes: attrs)
-                let badgeRect = CGRect(
-                    x: max(8, sel.minX),
-                    y: min(bounds.height - 28, sel.maxY + 6),
-                    width: strSize.width + 14,
-                    height: strSize.height + 6
-                )
-                ctx.saveGState()
-                let badgePath = CGPath(roundedRect: badgeRect, cornerWidth: 5, cornerHeight: 5, transform: nil)
-                ctx.addPath(badgePath)
-                ctx.setFillColor(NSColor.black.withAlphaComponent(0.78).cgColor)
-                ctx.fillPath()
-                ctx.restoreGState()
-                dimStr.draw(at: NSPoint(x: badgeRect.minX + 7, y: badgeRect.minY + 3), withAttributes: attrs)
+                drawHighlightedRegion(sel, showCornerHandles: true, in: ctx)
             }
         } else {
+            if let hoveredWin = hoveredWindowRect(at: mousePos), hoveredWin.width > 1, hoveredWin.height > 1 {
+                drawHighlightedRegion(hoveredWin, showCornerHandles: false, in: ctx)
+            }
             ctx.saveGState()
             ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.42).cgColor)
             ctx.setLineWidth(0.8)
@@ -594,6 +672,51 @@ final class PixPinSelectionView: NSView {
         }
 
         drawCrosshairAndLoupe(in: ctx)
+    }
+
+    private func drawHighlightedRegion(_ sel: NSRect, showCornerHandles: Bool, in ctx: CGContext) {
+        frozenImage.draw(in: sel, from: sel, operation: .copy, fraction: 1.0)
+
+        ctx.saveGState()
+        ctx.setStrokeColor(NSColor(calibratedRed: 0.15, green: 0.65, blue: 1.0, alpha: 1.0).cgColor)
+        ctx.setLineWidth(showCornerHandles ? 1.8 : 2.2)
+        ctx.stroke(sel)
+
+        if showCornerHandles {
+            let corners = [
+                NSPoint(x: sel.minX, y: sel.minY),
+                NSPoint(x: sel.maxX, y: sel.minY),
+                NSPoint(x: sel.minX, y: sel.maxY),
+                NSPoint(x: sel.maxX, y: sel.maxY)
+            ]
+            ctx.setFillColor(NSColor.white.cgColor)
+            for c in corners {
+                let hRect = CGRect(x: c.x - 3.5, y: c.y - 3.5, width: 7, height: 7)
+                ctx.fillEllipse(in: hRect)
+                ctx.strokeEllipse(in: hRect)
+            }
+        }
+        ctx.restoreGState()
+
+        let dimStr = "\(Int(sel.width)) × \(Int(sel.height))" as NSString
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: NSColor.white
+        ]
+        let strSize = dimStr.size(withAttributes: attrs)
+        let badgeRect = CGRect(
+            x: max(8, sel.minX),
+            y: min(bounds.height - 28, sel.maxY + 6),
+            width: strSize.width + 14,
+            height: strSize.height + 6
+        )
+        ctx.saveGState()
+        let badgePath = CGPath(roundedRect: badgeRect, cornerWidth: 5, cornerHeight: 5, transform: nil)
+        ctx.addPath(badgePath)
+        ctx.setFillColor(NSColor.black.withAlphaComponent(0.78).cgColor)
+        ctx.fillPath()
+        ctx.restoreGState()
+        dimStr.draw(at: NSPoint(x: badgeRect.minX + 7, y: badgeRect.minY + 3), withAttributes: attrs)
     }
 
     private func drawCrosshairAndLoupe(in ctx: CGContext) {

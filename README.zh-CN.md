@@ -91,11 +91,14 @@ make uninstall
 
 ## 基本用法
 
-### 1. 原地贴图与裁剪微调
+### 1. 智能窗口吸附、原地贴图与裁剪微调
 
-使用已配置的截图快捷键（出厂默认值为 `⌃X`）框选区域后，贴图会直接停留在所选的屏幕坐标处。
+使用已配置的截图快捷键（出厂默认值为 `⌃X`）：
+- **单击智能吸附窗口**：鼠标悬停在任意可见窗口（包括台前调度左侧缩略图）上会自动高亮识别边界，**直接单击**即可一键截取完整窗口。
+- **拖拽自由框选**：在桌面或任意窗口内按住鼠标拖拽，即可截取自定义区域。
+- **一键截全屏**：进入截图模式后按 **`Space`（空格键）** 或 **`⌘A`**，即可直接截取整张屏幕。
 
-在移动窗口或选择标注工具前（`100%` 缩放比例下），拖拽四周的 8 个圆点或 4 条边，可基于原始全屏画面继续放大或缩小裁剪范围。
+截图完成后，贴图会直接停留在所选的屏幕坐标处。在移动窗口或选择标注工具前（`100%` 缩放比例下），拖拽四周的 8 个圆点或 4 条边，可基于原始全屏画面继续放大或缩小裁剪范围。
 
 ### 2. 晾衣绳多图暂存
 
@@ -107,11 +110,11 @@ make uninstall
 
 ### 3. 标注、OCR 与翻译
 
-- **标注工具**：矩形、箭头、画笔、文字、像素马赛克（`CIPixellate`），提供 `细` / `中` / `粗` 三档尺寸与 6 种颜色。
+- **标注工具**：矩形（按住 `Shift` 锁定正方形）、箭头（按住 `Shift` 锁定 `45°` 方向）、画笔、半透明荧光笔（正片叠底不遮字）、自动递增序号章（`① ② ③…`，支持拖拽移动与改色改大小）、文字、像素马赛克（`CIPixellate`），提供 `细` / `中` / `粗` 三档尺寸与 6 种颜色。
 - **文字编辑**：支持透明底、黑底圆角、白底圆角背景。输入时按住文字框任意位置即可拖动；双击已提交的文字可原地重编辑。
 - **离线 OCR（`O`）**：使用 macOS `Vision` 离线识别简繁中文与英文，并复制到剪贴板。
 - **翻译路由（`T`）**：对合成后的图像执行 OCR，并按以下顺序发送识别文本：
-  1. 本地翻译进程（默认检测 `fy-daemon`，可通过 `CLIP_LINE_TRANSLATE_DAEMON` 指定）
+  1. 本地翻译进程（默认检测 `gloss-daemon`，可通过 `CLIP_LINE_TRANSLATE_DAEMON` 指定）
   2. 自定义翻译 URL 模板（`CLIP_LINE_TRANSLATE_URL`）
   3. macOS 系统翻译服务
   4. 默认浏览器网页翻译（每个外部域名首次打开前会弹窗确认）
@@ -170,7 +173,7 @@ Carbon 独占注册只能检测其他使用独占 Carbon 注册的快捷键冲�
 | `CLIP_LINE_TRANSLATE_TARGET` | `zh-CN`（中文界面）/ `en`（英文界面） | 内置网页翻译的目标语言代码（`tl` 参数） |
 | `CLIP_LINE_TRANSLATE_URL` | 未设置 | 自定义 HTTPS（或 `localhost` HTTP）翻译 URL 模板，使用 `{text}` 占位符 |
 | `TranslateURLTemplate` (`NSGlobalDomain`) | 未设置 | `CLIP_LINE_TRANSLATE_URL` 的 `defaults write` 持久化配置项 |
-| `CLIP_LINE_TRANSLATE_DAEMON` | `fy-daemon` | 本地翻译守护进程名 |
+| `CLIP_LINE_TRANSLATE_DAEMON` | `gloss-daemon` | 本地翻译守护进程名 |
 | `CLIP_LINE_TRANSLATE_CHANNEL` | `io.github.clipline.translate` | 本地翻译分布式通知通道 |
 | `CLIP_LINE_CAPTURE_CHANNEL` | `io.github.clipline.capture` | 外部触发截图的分布式通知通道 |
 
@@ -194,7 +197,7 @@ make clean      # 清理 ./build
 
 - **马赛克属于视觉遮挡**：使用 `CoreImage` 的 `CIPixellate` 像素化（若渲染异常则回退为不透明深色实心块）。如需处理密钥或密码等高敏感内容，请直接裁剪剔除或使用不透明画笔覆盖。
 - **临时文件**：为支持 Finder/Slack 文件粘贴与拖拽导出，程序会在 `$TMPDIR/ClipLine`（权限 `0700`）写入 `ClipLine_*.png`。超过 1 小时的旧文件会在进程启动和后续复制时清理。
-- **本地通知**：当检测到 `fy-daemon` 运行时，OCR 文本会通过当前登录用户会话内的 `DistributedNotificationCenter` 发送。
+- **本地通知**：当检测到 `gloss-daemon` 运行时，OCR 文本会通过当前登录用户会话内的 `DistributedNotificationCenter` 发送。
 
 ## 许可证
 

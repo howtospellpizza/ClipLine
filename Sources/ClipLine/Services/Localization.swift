@@ -70,6 +70,8 @@ enum L10n {
             case .rect: return "Rectangle"
             case .arrow: return "Arrow"
             case .pen: return "Pen"
+            case .highlighter: return "Highlighter"
+            case .counter: return "Step Counter"
             case .mosaic: return "Mosaic"
             case .text: return "Text"
             }
@@ -78,6 +80,8 @@ enum L10n {
             case .rect: return "框选"
             case .arrow: return "箭头"
             case .pen: return "画笔"
+            case .highlighter: return "荧光笔"
+            case .counter: return "序号章"
             case .mosaic: return "马赛克"
             case .text: return "文字"
             }
