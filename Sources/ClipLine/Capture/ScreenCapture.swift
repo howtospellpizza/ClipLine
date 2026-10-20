@@ -148,6 +148,39 @@ final class ScreenCaptureOverlayController {
         )
     }
 
+    nonisolated static func shouldIncludeWindowForSnap(
+        ownerPID: pid_t,
+        ownPID: pid_t,
+        ownerName: String?,
+        layer: Int,
+        alpha: Double,
+        viewRect: NSRect,
+        screenSize: NSSize
+    ) -> Bool {
+        if ownerPID == ownPID { return false }
+        // Only snap normal application windows (layer 0) and floating utility panels (layer 1...8);
+        // exclude Dock fullscreen backdrop (layer 20), menu bar, notification center, etc.
+        guard layer >= 0 && layer <= 8 else { return false }
+        guard alpha > 0.05 else { return false }
+        let excludedOwners: Set<String> = [
+            "Dock",
+            "WindowManager",
+            "Window Server",
+            "Control Center",
+            "Notification Center",
+            "Spotlight",
+            "Wallpaper"
+        ]
+        if let name = ownerName, excludedOwners.contains(name) {
+            return false
+        }
+        // Skip full-screen desktop/backdrop windows that cover >=98% of the screen
+        if viewRect.width >= screenSize.width * 0.98 && viewRect.height >= screenSize.height * 0.98 {
+            return false
+        }
+        return viewRect.width >= 24 && viewRect.height >= 24
+    }
+
     static func detectVisibleWindowRectsInView(for screen: NSScreen) -> [NSRect] {
         let primaryHeight = NSScreen.screens.first?.frame.height ?? screen.frame.height
         let ownPID = ProcessInfo.processInfo.processIdentifier
@@ -160,21 +193,25 @@ final class ScreenCaptureOverlayController {
 
         var rects: [NSRect] = []
         for entry in infoList {
-            if let ownerPID = entry[kCGWindowOwnerPID as String] as? pid_t, ownerPID == ownPID {
-                continue
-            }
+            let ownerPID = (entry[kCGWindowOwnerPID as String] as? pid_t) ?? 0
+            let ownerName = entry[kCGWindowOwnerName as String] as? String
             let layer = (entry[kCGWindowLayer as String] as? Int) ?? 0
-            // Keep standard application and floating panel windows (layer 0...23), skip menu bar / dock / wallpaper / screen-saver overlays
-            guard layer >= 0 && layer < 24 else { continue }
-            if let alpha = entry[kCGWindowAlpha as String] as? Double, alpha <= 0.05 {
-                continue
-            }
+            let alpha = (entry[kCGWindowAlpha as String] as? Double) ?? 1.0
             guard let boundsDict = entry[kCGWindowBounds as String] as? NSDictionary,
                   let cgBounds = CGRect(dictionaryRepresentation: boundsDict),
                   let viewRect = convertCGWindowBoundsToViewRect(
                       cgBounds: cgBounds,
                       primaryScreenHeight: primaryHeight,
                       targetScreenFrame: screen.frame
+                  ),
+                  shouldIncludeWindowForSnap(
+                      ownerPID: ownerPID,
+                      ownPID: ownPID,
+                      ownerName: ownerName,
+                      layer: layer,
+                      alpha: alpha,
+                      viewRect: viewRect,
+                      screenSize: screen.frame.size
                   ) else {
                 continue
             }

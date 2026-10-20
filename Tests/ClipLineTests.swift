@@ -211,6 +211,36 @@ func runAllTests() -> Int32 {
         "convertCGWindowBoundsToViewRect converts top-left CGWindow bounds to bottom-left AppKit view rect",
         detail: "got \(String(describing: convertedWindowRect))"
     )
+    t.check(
+        !ScreenCaptureOverlayController.shouldIncludeWindowForSnap(
+            ownerPID: 200,
+            ownPID: 100,
+            ownerName: "Dock",
+            layer: 20,
+            alpha: 1.0,
+            viewRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            screenSize: NSSize(width: 400, height: 300)
+        ) &&
+        !ScreenCaptureOverlayController.shouldIncludeWindowForSnap(
+            ownerPID: 201,
+            ownPID: 100,
+            ownerName: "WindowManager",
+            layer: 0,
+            alpha: 1.0,
+            viewRect: NSRect(x: 16, y: 195, width: 83, height: 120),
+            screenSize: NSSize(width: 400, height: 300)
+        ) &&
+        ScreenCaptureOverlayController.shouldIncludeWindowForSnap(
+            ownerPID: 202,
+            ownPID: 100,
+            ownerName: "Ghostty",
+            layer: 0,
+            alpha: 1.0,
+            viewRect: NSRect(x: 40, y: 30, width: 300, height: 220),
+            screenSize: NSSize(width: 400, height: 300)
+        ),
+        "shouldIncludeWindowForSnap excludes full-screen Dock backdrop (layer 20) and Stage Manager WindowManager thumbnails while keeping real app windows"
+    )
     var snappedResult: CaptureSelectionResult?
     let snapSelectionView = PixPinSelectionView(
         frame: screenFrame,
