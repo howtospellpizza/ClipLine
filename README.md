@@ -91,11 +91,13 @@ make uninstall
 
 ## Usage
 
-### 1. Capture and adjust crop in place
+### 1. Capture, window snap, and adjust crop in place
 
-Use the configured capture shortcut (factory default `⌃X`) and drag to select a region. The screenshot stays pinned at the exact screen coordinates you selected.
+Use the configured capture shortcut (factory default `⌃X`):
+- **Single-click window snap**: Hover over any visible window to preview its bounds, then **single-click** to capture that exact window in one step.
+- **Freehand drag**: Click and drag anywhere to select a custom region.
 
-Before moving the pin or selecting a drawing tool (at `100%` zoom), drag any of the 8 handles or 4 edges to expand or shrink the crop against the original full-screen frame.
+The screenshot stays pinned at the exact screen coordinates you selected. Before moving the pin or selecting a drawing tool (at `100%` zoom), drag any of the 8 handles or 4 edges to expand or shrink the crop against the original full-screen frame.
 
 ### 2. Hang multiple pins on the clothesline
 
@@ -107,7 +109,7 @@ Press `P` (or click the clothespin icon) to park the current pin on the clothesl
 
 ### 3. Annotate, OCR, and translate
 
-- **Tools**: Rectangle, arrow, freehand pen, text, and mosaic (`CIPixellate`), with 3 stroke sizes (`S` / `M` / `L` or `细` / `中` / `粗`) and 6 colors.
+- **Tools**: Rectangle (hold `Shift` for 1:1 square), arrow (hold `Shift` to snap `45°` angles), freehand pen, translucent highlighter (`.multiply` blend), auto-incrementing step counter (`① ② ③…`, draggable and recolorable), text, and mosaic (`CIPixellate`), with 3 stroke sizes (`S` / `M` / `L` or `细` / `中` / `粗`) and 6 colors.
 - **Text**: Supports transparent, black pill, or white pill backgrounds. Drag anywhere inside the text box to move it, or double-click committed text to edit it in place.
 - **OCR (`O`)**: Recognizes Simplified Chinese, Traditional Chinese, and English offline via macOS `Vision` and copies the text to your clipboard.
 - **Translate (`T`)**: Runs OCR on the composited image and routes text to:

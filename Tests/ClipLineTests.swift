@@ -200,6 +200,97 @@ func runAllTests() -> Int32 {
         "beginCapture aborts before showing wallpaper-only fullscreen overlay when Screen Recording permission is denied"
     )
 
+    // Window auto-detection & single-click snap vs drag override
+    let convertedWindowRect = ScreenCaptureOverlayController.convertCGWindowBoundsToViewRect(
+        cgBounds: CGRect(x: 50, y: 40, width: 180, height: 100),
+        primaryScreenHeight: 300,
+        targetScreenFrame: screenFrame
+    )
+    t.check(
+        convertedWindowRect == NSRect(x: 50, y: 160, width: 180, height: 100),
+        "convertCGWindowBoundsToViewRect converts top-left CGWindow bounds to bottom-left AppKit view rect",
+        detail: "got \(String(describing: convertedWindowRect))"
+    )
+    var snappedResult: CaptureSelectionResult?
+    let snapSelectionView = PixPinSelectionView(
+        frame: screenFrame,
+        screenOrigin: .zero,
+        frozenImage: NSImage(cgImage: cgScreen, size: screenFrame.size),
+        cgImage: cgScreen,
+        scaleFactor: 2.0,
+        candidateWindowRects: [
+            NSRect(x: 60, y: 90, width: 140, height: 100),
+            NSRect(x: 20, y: 20, width: 300, height: 240)
+        ],
+        onFinish: { snappedResult = $0 }
+    )
+    t.check(
+        snapSelectionView.hoveredWindowRect(at: NSPoint(x: 100, y: 120)) == NSRect(x: 60, y: 90, width: 140, height: 100),
+        "hoveredWindowRect returns the topmost front-to-back window containing cursor"
+    )
+    if let downSnap = NSEvent.mouseEvent(
+        with: .leftMouseDown, location: NSPoint(x: 100, y: 120), modifierFlags: [],
+        timestamp: 0, windowNumber: 0, context: nil, eventNumber: 1, clickCount: 1, pressure: 1.0
+    ),
+       let upSnap = NSEvent.mouseEvent(
+        with: .leftMouseUp, location: NSPoint(x: 101, y: 121), modifierFlags: [],
+        timestamp: 0, windowNumber: 0, context: nil, eventNumber: 2, clickCount: 1, pressure: 1.0
+       ) {
+        snapSelectionView.mouseDown(with: downSnap)
+        snapSelectionView.mouseUp(with: upSnap)
+        t.check(
+            snappedResult?.selectedScreenRect == NSRect(x: 60, y: 90, width: 140, height: 100),
+            "Single-clicking (<4pt drag) on a hovered window snaps capture to that window's exact bounds",
+            detail: "got \(String(describing: snappedResult?.selectedScreenRect))"
+        )
+    }
+
+    // Shift-constrained square & 45-degree arrow math + Step Counter + Highlighter
+    let constrainedSquareEnd = PinSessionViewModel.constrainedNormalizedEndPoint(
+        for: .rect,
+        start: CGPoint(x: 0.2, y: 0.2),
+        rawEnd: CGPoint(x: 0.7, y: 0.4),
+        canvasSize: NSSize(width: 200, height: 100)
+    )
+    let squareWidthPt = abs(constrainedSquareEnd.x - 0.2) * 200.0
+    let squareHeightPt = abs(constrainedSquareEnd.y - 0.2) * 100.0
+    t.check(
+        abs(squareWidthPt - squareHeightPt) < 0.01 && squareWidthPt > 10,
+        "Shift-constrained .rect locks 1:1 point-space square even on non-square canvases",
+        detail: "w=\(squareWidthPt), h=\(squareHeightPt)"
+    )
+
+    let constrainedArrowEnd = PinSessionViewModel.constrainedNormalizedEndPoint(
+        for: .arrow,
+        start: CGPoint(x: 0.5, y: 0.5),
+        rawEnd: CGPoint(x: 0.82, y: 0.53),
+        canvasSize: NSSize(width: 200, height: 100)
+    )
+    let arrowDxPt = (constrainedArrowEnd.x - 0.5) * 200.0
+    let arrowDyPt = (constrainedArrowEnd.y - 0.5) * 100.0
+    t.check(
+        abs(arrowDyPt) < 0.01 && arrowDxPt > 20,
+        "Shift-constrained .arrow snaps near-horizontal drag to exact 0° horizontal angle",
+        detail: "dx=\(arrowDxPt), dy=\(arrowDyPt)"
+    )
+
+    let featureVM = PinSessionViewModel(image: makeTextImage(text: "HIGHLIGHT", size: NSSize(width: 200, height: 80)))
+    t.check(featureVM.nextCounterLabel == "1", "nextCounterLabel starts at 1 when no counter annotations exist")
+    featureVM.annotations.append(PinAnnotation(tool: .counter, color: .systemRed, lineWidth: 28, points: [CGPoint(x: 0.3, y: 0.4)], text: featureVM.nextCounterLabel))
+    t.check(featureVM.nextCounterLabel == "2", "nextCounterLabel increments to 2 after placing first counter badge")
+    featureVM.annotations.append(PinAnnotation(tool: .highlighter, color: .systemYellow, lineWidth: 22, points: [CGPoint(x: 0.1, y: 0.5), CGPoint(x: 0.9, y: 0.5)]))
+    let renderedWithCounterAndHighlight = featureVM.renderCompositeImage()
+    t.check(
+        renderedWithCounterAndHighlight?.size == NSSize(width: 200, height: 80),
+        "renderCompositeImage renders .counter badges and .highlighter multiply strokes cleanly"
+    )
+    featureVM.undo()
+    featureVM.undo()
+    t.check(
+        featureVM.nextCounterLabel == "1",
+        "Undoing counter badge decrements nextCounterLabel back to 1"
+    )
+
     var openedSettingsFromHUD = false
     var revealedBinaryFromHUD = false
     var dismissedHUD = false

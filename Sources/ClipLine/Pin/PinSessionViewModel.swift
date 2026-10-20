@@ -97,10 +97,70 @@ final class PinSessionViewModel: ObservableObject {
         switch tool {
         case .mosaic:
             return strokePreset.mosaicBrushWidth
+        case .highlighter:
+            return strokePreset.highlighterBrushWidth
+        case .counter:
+            return strokePreset.counterBadgeDiameter
         case .text:
             return strokePreset.textFontSize
         case .rect, .arrow, .pen:
             return strokePreset.strokeLineWidth
+        }
+    }
+
+    var nextCounterLabel: String {
+        let count = annotations.filter { $0.tool == .counter }.count
+        return "\(count + 1)"
+    }
+
+    static func constrainedNormalizedEndPoint(
+        for tool: PinAnnotation.Tool,
+        start: CGPoint,
+        rawEnd: CGPoint,
+        canvasSize: NSSize
+    ) -> CGPoint {
+        let w = max(1.0, canvasSize.width)
+        let h = max(1.0, canvasSize.height)
+        let dxPt = (rawEnd.x - start.x) * w
+        let dyPt = (rawEnd.y - start.y) * h
+
+        switch tool {
+        case .rect:
+            let side = max(abs(dxPt), abs(dyPt))
+            let sx: CGFloat = dxPt >= 0 ? 1.0 : -1.0
+            let sy: CGFloat = dyPt >= 0 ? 1.0 : -1.0
+            let maxSideX = sx >= 0 ? (1.0 - start.x) * w : start.x * w
+            let maxSideY = sy >= 0 ? (1.0 - start.y) * h : start.y * h
+            let clampedSide = min(side, min(maxSideX, maxSideY))
+            return CGPoint(
+                x: max(0.0, min(1.0, start.x + (sx * clampedSide) / w)),
+                y: max(0.0, min(1.0, start.y + (sy * clampedSide) / h))
+            )
+        case .arrow:
+            let dist = hypot(dxPt, dyPt)
+            guard dist > 0.001 else { return rawEnd }
+            let step = CGFloat.pi / 4.0
+            let snappedAngle = (atan2(dyPt, dxPt) / step).rounded() * step
+            let ux = cos(snappedAngle)
+            let uy = sin(snappedAngle)
+            var maxDist = dist
+            if ux > 0.0001 {
+                maxDist = min(maxDist, ((1.0 - start.x) * w) / ux)
+            } else if ux < -0.0001 {
+                maxDist = min(maxDist, (start.x * w) / (-ux))
+            }
+            if uy > 0.0001 {
+                maxDist = min(maxDist, ((1.0 - start.y) * h) / uy)
+            } else if uy < -0.0001 {
+                maxDist = min(maxDist, (start.y * h) / (-uy))
+            }
+            let finalDist = max(0.0, maxDist)
+            return CGPoint(
+                x: max(0.0, min(1.0, start.x + (ux * finalDist) / w)),
+                y: max(0.0, min(1.0, start.y + (uy * finalDist) / h))
+            )
+        default:
+            return rawEnd
         }
     }
 
@@ -468,6 +528,59 @@ final class PinSessionViewModel: ObservableObject {
                 ctx.addLine(to: p)
             }
             ctx.strokePath()
+
+        case .highlighter:
+            guard pts.count >= 2 else { break }
+            ctx.saveGState()
+            ctx.setBlendMode(.multiply)
+            ctx.setStrokeColor(item.color.withAlphaComponent(0.38).cgColor)
+            ctx.setLineWidth(lw)
+            ctx.setLineCap(.butt)
+            ctx.setLineJoin(.round)
+            ctx.move(to: pts[0])
+            for p in pts.dropFirst() {
+                ctx.addLine(to: p)
+            }
+            ctx.strokePath()
+            ctx.restoreGState()
+
+        case .counter:
+            let center = pts[0]
+            let diameter = max(18.0, item.lineWidth) * scaleMultiplier
+            let radius = diameter / 2.0
+            let badgeRect = CGRect(x: center.x - radius, y: center.y - radius, width: diameter, height: diameter)
+
+            ctx.saveGState()
+            ctx.setShadow(offset: CGSize(width: 0, height: 1.5), blur: 3.5, color: NSColor.black.withAlphaComponent(0.36).cgColor)
+            ctx.setFillColor(item.color.cgColor)
+            ctx.fillEllipse(in: badgeRect)
+            ctx.restoreGState()
+
+            ctx.saveGState()
+            ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.95).cgColor)
+            ctx.setLineWidth(max(1.8, 2.0 * scaleMultiplier))
+            ctx.strokeEllipse(in: badgeRect)
+            ctx.restoreGState()
+
+            let label = item.text.isEmpty ? "1" : item.text
+            let fontSize = round(diameter * (label.count >= 2 ? 0.48 : 0.56))
+            let font = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .bold)
+            let rgb = item.color.usingColorSpace(.sRGB) ?? item.color
+            let luma = 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent
+            let fgColor: NSColor = luma > 0.72 ? .black : .white
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: fgColor
+            ]
+            let textSize = (label as NSString).size(withAttributes: attrs)
+            ctx.saveGState()
+            ctx.translateBy(x: center.x, y: center.y)
+            ctx.scaleBy(x: 1.0, y: -1.0)
+            (label as NSString).draw(
+                at: CGPoint(x: -textSize.width / 2.0, y: -textSize.height / 2.0),
+                withAttributes: attrs
+            )
+            ctx.restoreGState()
 
         case .mosaic:
             guard pts.count >= 2 else { break }
