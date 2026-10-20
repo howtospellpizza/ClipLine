@@ -746,7 +746,7 @@ final class PinSessionViewModel: ObservableObject {
     private static var configuredDaemonName: String {
         let envName = ProcessInfo.processInfo.environment["CLIP_LINE_TRANSLATE_DAEMON"]?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return envName.isEmpty ? "fy-daemon" : envName
+        return envName.isEmpty ? "gloss-daemon" : envName
     }
 
     private static func isTranslationDaemonRunning() -> Bool {

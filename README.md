@@ -113,7 +113,7 @@ Press `P` (or click the clothespin icon) to park the current pin on the clothesl
 - **Text**: Supports transparent, black pill, or white pill backgrounds. Drag anywhere inside the text box to move it, or double-click committed text to edit it in place.
 - **OCR (`O`)**: Recognizes Simplified Chinese, Traditional Chinese, and English offline via macOS `Vision` and copies the text to your clipboard.
 - **Translate (`T`)**: Runs OCR on the composited image and routes text to:
-  1. Local translation daemon (`fy-daemon`, or custom name via `CLIP_LINE_TRANSLATE_DAEMON`)
+  1. Local translation daemon (`gloss-daemon`, or custom name via `CLIP_LINE_TRANSLATE_DAEMON`)
   2. Custom URL template (`CLIP_LINE_TRANSLATE_URL`)
   3. macOS system Translation service
   4. Browser translation (prompts once per destination domain before opening)
@@ -172,7 +172,7 @@ On first capture, macOS prompts for **Screen Recording** permission. The prompt 
 | `CLIP_LINE_TRANSLATE_TARGET` | `en` (EN UI) / `zh-CN` (ZH UI) | Target language code (`tl`) for built-in web translation fallback |
 | `CLIP_LINE_TRANSLATE_URL` | Unset | Custom HTTPS (or `localhost` HTTP) URL template using `{text}` placeholder |
 | `TranslateURLTemplate` (`NSGlobalDomain`) | Unset | Persistent `defaults write` equivalent of `CLIP_LINE_TRANSLATE_URL` |
-| `CLIP_LINE_TRANSLATE_DAEMON` | `fy-daemon` | Process name checked for local translation routing |
+| `CLIP_LINE_TRANSLATE_DAEMON` | `gloss-daemon` | Process name checked for local translation routing |
 | `CLIP_LINE_TRANSLATE_CHANNEL` | `io.github.clipline.translate` | Distributed notification channel for local translation |
 | `CLIP_LINE_CAPTURE_CHANNEL` | `io.github.clipline.capture` | Distributed notification channel for external capture triggers |
 
@@ -196,7 +196,7 @@ make clean      # remove ./build
 
 - **Mosaic is visual obfuscation**: Uses `CoreImage` `CIPixellate` (and falls back to an opaque dark fill if pixelation fails). For sensitive credentials or keys, crop them out or cover them with an opaque pen stroke.
 - **Temporary files**: Writes `ClipLine_*.png` to `$TMPDIR/ClipLine` (`0700`) so file-paste and drag-and-drop work across Finder and chat apps. Files older than 1 hour are removed on daemon startup and on subsequent copy actions.
-- **Local notifications**: When `fy-daemon` is running, OCR text is posted via `DistributedNotificationCenter` within the current macOS user session.
+- **Local notifications**: When `gloss-daemon` is running, OCR text is posted via `DistributedNotificationCenter` within the current macOS user session.
 
 ## License
 

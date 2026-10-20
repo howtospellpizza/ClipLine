@@ -113,7 +113,7 @@ make uninstall
 - **文字编辑**：支持透明底、黑底圆角、白底圆角背景。输入时按住文字框任意位置即可拖动；双击已提交的文字可原地重编辑。
 - **离线 OCR（`O`）**：使用 macOS `Vision` 离线识别简繁中文与英文，并复制到剪贴板。
 - **翻译路由（`T`）**：对合成后的图像执行 OCR，并按以下顺序发送识别文本：
-  1. 本地翻译进程（默认检测 `fy-daemon`，可通过 `CLIP_LINE_TRANSLATE_DAEMON` 指定）
+  1. 本地翻译进程（默认检测 `gloss-daemon`，可通过 `CLIP_LINE_TRANSLATE_DAEMON` 指定）
   2. 自定义翻译 URL 模板（`CLIP_LINE_TRANSLATE_URL`）
   3. macOS 系统翻译服务
   4. 默认浏览器网页翻译（每个外部域名首次打开前会弹窗确认）
@@ -172,7 +172,7 @@ Carbon 独占注册只能检测其他使用独占 Carbon 注册的快捷键冲�
 | `CLIP_LINE_TRANSLATE_TARGET` | `zh-CN`（中文界面）/ `en`（英文界面） | 内置网页翻译的目标语言代码（`tl` 参数） |
 | `CLIP_LINE_TRANSLATE_URL` | 未设置 | 自定义 HTTPS（或 `localhost` HTTP）翻译 URL 模板，使用 `{text}` 占位符 |
 | `TranslateURLTemplate` (`NSGlobalDomain`) | 未设置 | `CLIP_LINE_TRANSLATE_URL` 的 `defaults write` 持久化配置项 |
-| `CLIP_LINE_TRANSLATE_DAEMON` | `fy-daemon` | 本地翻译守护进程名 |
+| `CLIP_LINE_TRANSLATE_DAEMON` | `gloss-daemon` | 本地翻译守护进程名 |
 | `CLIP_LINE_TRANSLATE_CHANNEL` | `io.github.clipline.translate` | 本地翻译分布式通知通道 |
 | `CLIP_LINE_CAPTURE_CHANNEL` | `io.github.clipline.capture` | 外部触发截图的分布式通知通道 |
 
@@ -196,7 +196,7 @@ make clean      # 清理 ./build
 
 - **马赛克属于视觉遮挡**：使用 `CoreImage` 的 `CIPixellate` 像素化（若渲染异常则回退为不透明深色实心块）。如需处理密钥或密码等高敏感内容，请直接裁剪剔除或使用不透明画笔覆盖。
 - **临时文件**：为支持 Finder/Slack 文件粘贴与拖拽导出，程序会在 `$TMPDIR/ClipLine`（权限 `0700`）写入 `ClipLine_*.png`。超过 1 小时的旧文件会在进程启动和后续复制时清理。
-- **本地通知**：当检测到 `fy-daemon` 运行时，OCR 文本会通过当前登录用户会话内的 `DistributedNotificationCenter` 发送。
+- **本地通知**：当检测到 `gloss-daemon` 运行时，OCR 文本会通过当前登录用户会话内的 `DistributedNotificationCenter` 发送。
 
 ## 许可证
 
