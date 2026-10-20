@@ -599,6 +599,22 @@ func runAllTests() -> Int32 {
         detail: "toolbarMaxY=\(toolbarMaxY), bottomHandleScreenY=\(bottomHandleScreenY)"
     )
 
+    // Verify full-screen pin keeps toolbar panel within visible screen bounds
+    let mainScreen = pinPanel.screen ?? NSScreen.main ?? NSScreen.screens.first
+    if let mainScreen {
+        let fullFrame = PinSessionViewModel.panelFrameForImageScreenRect(mainScreen.frame)
+        pinPanel.setFrame(fullFrame, display: false)
+        vm.updateToolbarPanelPosition()
+        t.check(
+            tbPanel.frame.minY >= mainScreen.visibleFrame.minY &&
+            tbPanel.frame.maxY <= mainScreen.visibleFrame.maxY,
+            "Full-screen pin clamps toolbar panel inside visible screen bounds instead of off-screen above menu bar",
+            detail: "tbPanel.frame=\(tbPanel.frame), visibleFrame=\(mainScreen.visibleFrame)"
+        )
+        pinPanel.setFrame(panelFrame, display: false)
+        vm.updateToolbarPanelPosition()
+    }
+
     let handlePts = canvas.handlePointsInView()
     t.check(handlePts.count == 8, "handlePointsInView returns all 8 resize handles")
     for (expectedHandle, pt) in handlePts {

@@ -241,8 +241,14 @@ final class PinSessionViewModel: ObservableObject {
         // Place toolbar 12pt below the bottom border of the image (leaving plenty of room for bottom handles!)
         var tbY = round(imageMinY - tbSize.height - 12)
         if tbY < visible.minY + 6 {
-            // If image is at the very bottom of the screen, place toolbar 12pt above the top border of the image
-            tbY = round(imageMaxY + 12)
+            // If image is at the very bottom of the screen, try 12pt above the top border of the image
+            let aboveTopY = round(imageMaxY + 12)
+            if aboveTopY + tbSize.height <= visible.maxY - 6 {
+                tbY = aboveTopY
+            } else {
+                // Full-screen or tall pin: float the toolbar cleanly inside the bottom of the visible screen
+                tbY = round(visible.minY + 16)
+            }
         }
 
         tbPanel.setFrameOrigin(NSPoint(x: tbX, y: tbY))
