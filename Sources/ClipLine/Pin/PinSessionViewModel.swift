@@ -254,6 +254,8 @@ final class PinSessionViewModel: ObservableObject {
         tbPanel.setFrameOrigin(NSPoint(x: tbX, y: tbY))
         if !tbPanel.isVisible {
             tbPanel.orderFrontRegardless()
+        } else {
+            tbPanel.order(.above, relativeTo: imgPanel.windowNumber)
         }
     }
 

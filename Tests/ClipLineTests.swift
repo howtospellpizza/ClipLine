@@ -582,6 +582,10 @@ func runAllTests() -> Int32 {
 
     t.check(pinPanel.isVisible, "PinFloatingPanel is visible on screen")
     t.check(tbPanel.isVisible, "Detached PinToolbarPanel is visible on screen")
+    t.check(
+        tbPanel.level.rawValue > pinPanel.level.rawValue,
+        "PinToolbarPanel level stays strictly above PinFloatingPanel so editing/clicking canvas never obscures toolbar"
+    )
     t.check(tbPanel.viewModel === vm, "PinToolbarPanel.viewModel is wired to PinSessionViewModel")
 
     // Verify 4A: Image rect & all 8 handle hit-testing

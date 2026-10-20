@@ -299,6 +299,13 @@ final class PinFloatingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
+    override func becomeKey() {
+        super.becomeKey()
+        if let vm = viewModel, vm.showToolbar, let tbPanel = vm.toolbarPanel, tbPanel.isVisible {
+            tbPanel.order(.above, relativeTo: windowNumber)
+        }
+    }
+
     override func cancelOperation(_ sender: Any?) {
         onClosePanel?()
     }

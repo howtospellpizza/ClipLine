@@ -323,6 +323,9 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeKey()
+        if vm.showToolbar, let imgPanel = window, let tbPanel = vm.toolbarPanel, tbPanel.isVisible {
+            tbPanel.order(.above, relativeTo: imgPanel.windowNumber)
+        }
         let pt = convert(event.locationInWindow, from: nil)
         let screenPt = NSEvent.mouseLocation
 
@@ -429,12 +432,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             return
         }
 
-        // 4. Otherwise, double-click toggles toolbar, single-drag moves the floating pin window
-        if event.clickCount == 2 {
-            vm.showToolbar.toggle()
-            return
-        }
-
+        // 4. Otherwise, single-drag moves the floating pin window (use Space to toggle toolbar)
         isDraggingWindow = true
         windowDragStartMouseScreen = screenPt
         windowDragStartOrigin = window?.frame.origin ?? .zero

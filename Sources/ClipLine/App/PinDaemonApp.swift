@@ -335,7 +335,7 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
             defer: false
         )
         tbPanel.isFloatingPanel = true
-        tbPanel.level = .floating
+        tbPanel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
         tbPanel.animationBehavior = .none
         tbPanel.backgroundColor = .clear
         tbPanel.isOpaque = false
