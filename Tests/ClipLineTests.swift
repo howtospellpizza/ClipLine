@@ -221,7 +221,7 @@ func runAllTests() -> Int32 {
             viewRect: NSRect(x: 0, y: 0, width: 400, height: 300),
             screenSize: NSSize(width: 400, height: 300)
         ) &&
-        !ScreenCaptureOverlayController.shouldIncludeWindowForSnap(
+        ScreenCaptureOverlayController.shouldIncludeWindowForSnap(
             ownerPID: 201,
             ownPID: 100,
             ownerName: "WindowManager",
@@ -239,7 +239,7 @@ func runAllTests() -> Int32 {
             viewRect: NSRect(x: 40, y: 30, width: 300, height: 220),
             screenSize: NSSize(width: 400, height: 300)
         ),
-        "shouldIncludeWindowForSnap excludes full-screen Dock backdrop (layer 20) and Stage Manager WindowManager thumbnails while keeping real app windows"
+        "shouldIncludeWindowForSnap excludes full-screen Dock backdrop (layer 20) while keeping Stage Manager thumbnails and real app windows"
     )
     var snappedResult: CaptureSelectionResult?
     let snapSelectionView = PixPinSelectionView(
@@ -271,6 +271,18 @@ func runAllTests() -> Int32 {
         t.check(
             snappedResult?.selectedScreenRect == NSRect(x: 60, y: 90, width: 140, height: 100),
             "Single-clicking (<4pt drag) on a hovered window snaps capture to that window's exact bounds",
+            detail: "got \(String(describing: snappedResult?.selectedScreenRect))"
+        )
+    }
+    snappedResult = nil
+    if let spaceKey = NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+        context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49
+    ) {
+        snapSelectionView.keyDown(with: spaceKey)
+        t.check(
+            snappedResult?.selectedScreenRect == screenFrame,
+            "Pressing Space in capture overlay captures the entire screen",
             detail: "got \(String(describing: snappedResult?.selectedScreenRect))"
         )
     }

@@ -94,8 +94,9 @@ make uninstall
 ### 1. Capture, window snap, and adjust crop in place
 
 Use the configured capture shortcut (factory default `⌃X`):
-- **Single-click window snap**: Hover over any visible window to preview its bounds, then **single-click** to capture that exact window in one step.
-- **Freehand drag**: Click and drag anywhere to select a custom region.
+- **Single-click window snap**: Hover over any visible window (including Stage Manager thumbnails) to preview its bounds, then **single-click** to capture that exact window in one step.
+- **Freehand drag**: Click and drag anywhere (including on the desktop) to select a custom region.
+- **Full-screen capture**: Press `Space` or `⌘A` while in the capture overlay to capture the entire screen immediately.
 
 The screenshot stays pinned at the exact screen coordinates you selected. Before moving the pin or selecting a drawing tool (at `100%` zoom), drag any of the 8 handles or 4 edges to expand or shrink the crop against the original full-screen frame.
 

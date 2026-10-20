@@ -164,7 +164,6 @@ final class ScreenCaptureOverlayController {
         guard alpha > 0.05 else { return false }
         let excludedOwners: Set<String> = [
             "Dock",
-            "WindowManager",
             "Window Server",
             "Control Center",
             "Notification Center",
@@ -568,32 +567,21 @@ final class PixPinSelectionView: NSView {
         needsDisplay = true
     }
 
-    override func mouseUp(with event: NSEvent) {
-        guard let s = startDragPos, let e = currentDragPos else {
-            onFinish(nil)
-            return
-        }
-        let dragDistance = hypot(e.x - s.x, e.y - s.y)
-        let rect: NSRect
-        if dragDistance < 4.0, let snappedWindow = hoveredWindowRect(at: e),
-           snappedWindow.width >= 24, snappedWindow.height >= 24 {
-            rect = snappedWindow
-        } else {
-            rect = normalizedRect(from: s, to: e).intersection(bounds)
-        }
-        if rect.isEmpty || rect.width < 24 || rect.height < 24 {
+    private func completeCapture(with rect: NSRect) {
+        let clippedRect = rect.intersection(bounds)
+        if clippedRect.isEmpty || clippedRect.width < 24 || clippedRect.height < 24 {
             startDragPos = nil
             currentDragPos = nil
             needsDisplay = true
             return
         }
-        guard let cropped = Self.cropImage(cgImage: cgImage, viewHeight: bounds.height, scaleFactor: scaleFactor, rect: rect) else {
+        guard let cropped = Self.cropImage(cgImage: cgImage, viewHeight: bounds.height, scaleFactor: scaleFactor, rect: clippedRect) else {
             onFinish(nil)
             return
         }
         let globalRect = NSRect(
-            x: screenOrigin.x + rect.origin.x,
-            y: screenOrigin.y + rect.origin.y,
+            x: screenOrigin.x + clippedRect.origin.x,
+            y: screenOrigin.y + clippedRect.origin.y,
             width: cropped.size.width,
             height: cropped.size.height
         )
@@ -607,6 +595,22 @@ final class PixPinSelectionView: NSView {
         onFinish(res)
     }
 
+    override func mouseUp(with event: NSEvent) {
+        guard let s = startDragPos, let e = currentDragPos else {
+            onFinish(nil)
+            return
+        }
+        let dragDistance = hypot(e.x - s.x, e.y - s.y)
+        let rect: NSRect
+        if dragDistance < 4.0, let snappedWindow = hoveredWindowRect(at: e),
+           snappedWindow.width >= 24, snappedWindow.height >= 24 {
+            rect = snappedWindow
+        } else {
+            rect = normalizedRect(from: s, to: e).intersection(bounds)
+        }
+        completeCapture(with: rect)
+    }
+
     override func rightMouseDown(with event: NSEvent) {
         onFinish(nil)
     }
@@ -614,6 +618,9 @@ final class PixPinSelectionView: NSView {
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { // Esc
             onFinish(nil)
+        } else if event.keyCode == 49 || (event.keyCode == 0 && event.modifierFlags.contains(.command)) {
+            // Space (49) or Cmd+A (0 with .command) captures the entire screen
+            completeCapture(with: bounds)
         }
     }
 
