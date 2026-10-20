@@ -173,10 +173,6 @@ final class ScreenCaptureOverlayController {
         if let name = ownerName, excludedOwners.contains(name) {
             return false
         }
-        // Skip full-screen desktop/backdrop windows that cover >=98% of the screen
-        if viewRect.width >= screenSize.width * 0.98 && viewRect.height >= screenSize.height * 0.98 {
-            return false
-        }
         return viewRect.width >= 24 && viewRect.height >= 24
     }
 
@@ -618,7 +614,7 @@ final class PixPinSelectionView: NSView {
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { // Esc
             onFinish(nil)
-        } else if event.keyCode == 49 || (event.keyCode == 0 && event.modifierFlags.contains(.command)) {
+        } else if !event.isARepeat && (event.keyCode == 49 || (event.keyCode == 0 && event.modifierFlags.contains(.command))) {
             // Space (49) or Cmd+A (0 with .command) captures the entire screen
             completeCapture(with: bounds)
         }

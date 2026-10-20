@@ -213,10 +213,19 @@ func runAllTests() -> Int32 {
     )
     t.check(
         !ScreenCaptureOverlayController.shouldIncludeWindowForSnap(
+            ownerPID: 100,
+            ownPID: 100,
+            ownerName: "ClipLine",
+            layer: 0,
+            alpha: 1.0,
+            viewRect: NSRect(x: 40, y: 30, width: 300, height: 220),
+            screenSize: NSSize(width: 400, height: 300)
+        ) &&
+        !ScreenCaptureOverlayController.shouldIncludeWindowForSnap(
             ownerPID: 200,
             ownPID: 100,
             ownerName: "Dock",
-            layer: 20,
+            layer: 0,
             alpha: 1.0,
             viewRect: NSRect(x: 0, y: 0, width: 400, height: 300),
             screenSize: NSSize(width: 400, height: 300)
@@ -236,10 +245,10 @@ func runAllTests() -> Int32 {
             ownerName: "Ghostty",
             layer: 0,
             alpha: 1.0,
-            viewRect: NSRect(x: 40, y: 30, width: 300, height: 220),
+            viewRect: NSRect(x: 0, y: 0, width: 400, height: 300),
             screenSize: NSSize(width: 400, height: 300)
         ),
-        "shouldIncludeWindowForSnap excludes full-screen Dock backdrop (layer 20) while keeping Stage Manager thumbnails and real app windows"
+        "shouldIncludeWindowForSnap excludes own process and Dock backdrop while keeping Stage Manager thumbnails and fullscreen app windows"
     )
     var snappedResult: CaptureSelectionResult?
     let snapSelectionView = PixPinSelectionView(
@@ -275,6 +284,38 @@ func runAllTests() -> Int32 {
         )
     }
     snappedResult = nil
+    if let downDrag = NSEvent.mouseEvent(
+        with: .leftMouseDown, location: NSPoint(x: 70, y: 100), modifierFlags: [],
+        timestamp: 0, windowNumber: 0, context: nil, eventNumber: 3, clickCount: 1, pressure: 1.0
+    ),
+       let moveDrag = NSEvent.mouseEvent(
+        with: .leftMouseDragged, location: NSPoint(x: 150, y: 160), modifierFlags: [],
+        timestamp: 0, windowNumber: 0, context: nil, eventNumber: 4, clickCount: 1, pressure: 1.0
+       ),
+       let upDrag = NSEvent.mouseEvent(
+        with: .leftMouseUp, location: NSPoint(x: 150, y: 160), modifierFlags: [],
+        timestamp: 0, windowNumber: 0, context: nil, eventNumber: 5, clickCount: 1, pressure: 1.0
+       ) {
+        snapSelectionView.mouseDown(with: downDrag)
+        snapSelectionView.mouseDragged(with: moveDrag)
+        snapSelectionView.mouseUp(with: upDrag)
+        t.check(
+            snappedResult?.selectedScreenRect == NSRect(x: 70, y: 100, width: 80, height: 60),
+            "Dragging >=4pt overrides hovered window snap and captures the custom selection rect",
+            detail: "got \(String(describing: snappedResult?.selectedScreenRect))"
+        )
+    }
+    snappedResult = nil
+    if let repeatSpace = NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+        context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: true, keyCode: 49
+    ) {
+        snapSelectionView.keyDown(with: repeatSpace)
+        t.check(
+            snappedResult == nil,
+            "Auto-repeated Space keyDown is ignored by capture overlay"
+        )
+    }
     if let spaceKey = NSEvent.keyEvent(
         with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
         context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49
@@ -283,6 +324,18 @@ func runAllTests() -> Int32 {
         t.check(
             snappedResult?.selectedScreenRect == screenFrame,
             "Pressing Space in capture overlay captures the entire screen",
+            detail: "got \(String(describing: snappedResult?.selectedScreenRect))"
+        )
+    }
+    snappedResult = nil
+    if let cmdAKey = NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: [.command], timestamp: 0, windowNumber: 0,
+        context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0
+    ) {
+        snapSelectionView.keyDown(with: cmdAKey)
+        t.check(
+            snappedResult?.selectedScreenRect == screenFrame,
+            "Pressing Cmd+A in capture overlay captures the entire screen",
             detail: "got \(String(describing: snappedResult?.selectedScreenRect))"
         )
     }
@@ -316,15 +369,71 @@ func runAllTests() -> Int32 {
         detail: "dx=\(arrowDxPt), dy=\(arrowDyPt)"
     )
 
-    let featureVM = PinSessionViewModel(image: makeTextImage(text: "HIGHLIGHT", size: NSSize(width: 200, height: 80)))
+    let featureBaseImage = makeTextImage(text: "HIGHLIGHT", size: NSSize(width: 200, height: 80))
+    let featureVM = PinSessionViewModel(image: featureBaseImage)
     t.check(featureVM.nextCounterLabel == "1", "nextCounterLabel starts at 1 when no counter annotations exist")
-    featureVM.annotations.append(PinAnnotation(tool: .counter, color: .systemRed, lineWidth: 28, points: [CGPoint(x: 0.3, y: 0.4)], text: featureVM.nextCounterLabel))
+    featureVM.annotations.append(PinAnnotation(tool: .counter, color: .systemRed, lineWidth: 28, points: [CGPoint(x: 0.25, y: 0.28)], text: featureVM.nextCounterLabel))
     t.check(featureVM.nextCounterLabel == "2", "nextCounterLabel increments to 2 after placing first counter badge")
-    featureVM.annotations.append(PinAnnotation(tool: .highlighter, color: .systemYellow, lineWidth: 22, points: [CGPoint(x: 0.1, y: 0.5), CGPoint(x: 0.9, y: 0.5)]))
+    featureVM.annotations.append(PinAnnotation(tool: .highlighter, color: .systemYellow, lineWidth: 22, points: [CGPoint(x: 0.15, y: 0.72), CGPoint(x: 0.85, y: 0.72)]))
     let renderedWithCounterAndHighlight = featureVM.renderCompositeImage()
+    var counterAndHighlightRegionCheck = false
+    if let renderedWithCounterAndHighlight,
+       let baseTIFF = featureBaseImage.tiffRepresentation,
+       let baseBMP = NSBitmapImageRep(data: baseTIFF),
+       let outTIFF = renderedWithCounterAndHighlight.tiffRepresentation,
+       let outBMP = NSBitmapImageRep(data: outTIFF),
+       baseBMP.pixelsWide == outBMP.pixelsWide,
+       baseBMP.pixelsHigh == outBMP.pixelsHigh {
+        let w = outBMP.pixelsWide
+        let h = outBMP.pixelsHigh
+        // NSBitmapImageRep.colorAt(x:y:) uses top-left origin (y=0 at top), matching normalized top-down Y!
+        // Counter badge is at normalized (0.25, 0.28); highlighter stroke is at normalized y=0.72 across x in [0.15, 0.85].
+        var badgeRedInsideRegion = 0
+        var badgeRedOutsideRegion = 0
+        var highlightYellowInsideRegion = 0
+        var highlightYellowOutsideRegion = 0
+        var untouchedCornerMatchesBase = true
+
+        for y in stride(from: 2, to: h - 2, by: 2) {
+            let ny = CGFloat(y) / CGFloat(h)
+            for x in stride(from: 2, to: w - 2, by: 2) {
+                let nx = CGFloat(x) / CGFloat(w)
+                guard let c = outBMP.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                      let bc = baseBMP.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+
+                let isRed = c.redComponent > 0.75 && c.greenComponent < 0.35 && c.blueComponent < 0.35
+                let isYellow = c.redComponent > 0.85 && c.greenComponent > 0.80 && c.blueComponent < 0.75
+
+                let inBadgeBox = (nx >= 0.14 && nx <= 0.36 && ny >= 0.04 && ny <= 0.52)
+                let inHighlightBox = (nx >= 0.10 && nx <= 0.90 && ny >= 0.54 && ny <= 0.90)
+
+                if isRed {
+                    if inBadgeBox { badgeRedInsideRegion += 1 } else { badgeRedOutsideRegion += 1 }
+                }
+                if isYellow {
+                    if inHighlightBox { highlightYellowInsideRegion += 1 } else { highlightYellowOutsideRegion += 1 }
+                }
+
+                // Far top-right region (nx > 0.75, ny < 0.22) must remain identical to base image
+                if nx > 0.75 && ny < 0.22 {
+                    let diff = abs(c.redComponent - bc.redComponent) + abs(c.greenComponent - bc.greenComponent) + abs(c.blueComponent - bc.blueComponent)
+                    if diff > 0.02 {
+                        untouchedCornerMatchesBase = false
+                    }
+                }
+            }
+        }
+        counterAndHighlightRegionCheck = (
+            badgeRedInsideRegion >= 8 &&
+            badgeRedOutsideRegion == 0 &&
+            highlightYellowInsideRegion >= 8 &&
+            highlightYellowOutsideRegion == 0 &&
+            untouchedCornerMatchesBase
+        )
+    }
     t.check(
-        renderedWithCounterAndHighlight?.size == NSSize(width: 200, height: 80),
-        "renderCompositeImage renders .counter badges and .highlighter multiply strokes cleanly"
+        renderedWithCounterAndHighlight?.size == NSSize(width: 200, height: 80) && counterAndHighlightRegionCheck,
+        "renderCompositeImage paints .counter badge and .highlighter stroke inside their expected regions while leaving outside pixels untouched"
     )
     featureVM.undo()
     featureVM.undo()
@@ -583,10 +692,94 @@ func runAllTests() -> Int32 {
     t.check(pinPanel.isVisible, "PinFloatingPanel is visible on screen")
     t.check(tbPanel.isVisible, "Detached PinToolbarPanel is visible on screen")
     t.check(
-        tbPanel.level.rawValue > pinPanel.level.rawValue,
-        "PinToolbarPanel level stays strictly above PinFloatingPanel so editing/clicking canvas never obscures toolbar"
+        tbPanel.level == pinPanel.level && pinPanel.childWindows?.contains(tbPanel) == true,
+        "PinToolbarPanel shares .floating level and is attached as an ordered-above child window of its own PinFloatingPanel"
     )
     t.check(tbPanel.viewModel === vm, "PinToolbarPanel.viewModel is wired to PinSessionViewModel")
+
+    // Verify multi-pin overlapping stacking: Pin B and its toolbar stay above Pin A and Pin A's toolbar when B is active,
+    // and clicking/activating Pin A brings Pin A and Pin A's toolbar above Pin B and Pin B's toolbar!
+    let secondPinVM = PinSessionViewModel(image: baseImg)
+    let overlappingFrame = panelFrame.offsetBy(dx: 24, dy: -18)
+    daemon.presentPinPanel(vm: secondPinVM, frame: overlappingFrame)
+    if let pinPanelB = secondPinVM.hostingPanel,
+       let tbPanelB = secondPinVM.toolbarPanel as? PinToolbarPanel {
+        func currentWindowNumOrder() -> [Int] {
+            NSWindow.windowNumbers(options: [])?.map(\.intValue) ?? []
+        }
+        let orderedAfterB = currentWindowNumOrder()
+        let idxPinA1 = orderedAfterB.firstIndex(of: pinPanel.windowNumber) ?? -1
+        let idxTbA1 = orderedAfterB.firstIndex(of: tbPanel.windowNumber) ?? -1
+        let idxPinB1 = orderedAfterB.firstIndex(of: pinPanelB.windowNumber) ?? -1
+        let idxTbB1 = orderedAfterB.firstIndex(of: tbPanelB.windowNumber) ?? -1
+        t.check(
+            idxTbB1 >= 0 && idxPinB1 >= 0 && idxTbA1 >= 0 && idxPinA1 >= 0 &&
+            idxTbB1 < idxPinB1 && idxPinB1 < idxTbA1,
+            "Presenting second overlapping pin orders Pin B + Toolbar B above Pin A's toolbar",
+            detail: "ordered indices: tbB=\(idxTbB1), pinB=\(idxPinB1), tbA=\(idxTbA1), pinA=\(idxPinA1)"
+        )
+
+        // Now activate Pin A via canvas click and verify Pin A + Toolbar A rise above Pin B + Toolbar B
+        if let clickPinA = NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: NSPoint(x: 40, y: 40),
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: pinPanel.windowNumber,
+            context: nil,
+            eventNumber: 90,
+            clickCount: 1,
+            pressure: 1.0
+        ),
+           let upPinA = NSEvent.mouseEvent(
+            with: .leftMouseUp,
+            location: NSPoint(x: 40, y: 40),
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: pinPanel.windowNumber,
+            context: nil,
+            eventNumber: 91,
+            clickCount: 1,
+            pressure: 1.0
+           ) {
+            canvas.mouseDown(with: clickPinA)
+            canvas.mouseUp(with: upPinA)
+            let orderedAfterClickA = currentWindowNumOrder()
+            let idxPinA2 = orderedAfterClickA.firstIndex(of: pinPanel.windowNumber) ?? -1
+            let idxTbA2 = orderedAfterClickA.firstIndex(of: tbPanel.windowNumber) ?? -1
+            let idxPinB2 = orderedAfterClickA.firstIndex(of: pinPanelB.windowNumber) ?? -1
+            let idxTbB2 = orderedAfterClickA.firstIndex(of: tbPanelB.windowNumber) ?? -1
+            t.check(
+                idxTbA2 >= 0 && idxPinA2 >= 0 && idxTbB2 >= 0 && idxPinB2 >= 0 &&
+                idxTbA2 < idxPinA2 && idxPinA2 < idxTbB2,
+                "Clicking Pin A brings Pin A + Toolbar A above overlapping Pin B + Toolbar B",
+                detail: "ordered indices: tbA=\(idxTbA2), pinA=\(idxPinA2), tbB=\(idxTbB2), pinB=\(idxPinB2)"
+            )
+        }
+
+        // Clip Pin B to Clothesline and restore it, verifying child-window attachment and front ordering are restored
+        ClotheslineManager.shared.clipToLine(vm: secondPinVM)
+        let detachedWhileClipped = (pinPanelB.childWindows?.contains(tbPanelB) != true) && !pinPanelB.isVisible && !tbPanelB.isVisible
+        if let clippedB = ClotheslineManager.shared.items.first(where: { $0.id == secondPinVM.id }) {
+            ClotheslineManager.shared.restoreToCanvas(clippedB)
+        }
+        let orderedAfterRestoreB = currentWindowNumOrder()
+        let idxTbB3 = orderedAfterRestoreB.firstIndex(of: tbPanelB.windowNumber) ?? -1
+        let idxPinB3 = orderedAfterRestoreB.firstIndex(of: pinPanelB.windowNumber) ?? -1
+        let idxTbA3 = orderedAfterRestoreB.firstIndex(of: tbPanel.windowNumber) ?? -1
+        t.check(
+            detachedWhileClipped &&
+            pinPanelB.childWindows?.contains(tbPanelB) == true &&
+            idxTbB3 >= 0 && idxPinB3 >= 0 && idxTbA3 >= 0 &&
+            idxTbB3 < idxPinB3 && idxPinB3 < idxTbA3,
+            "Clipping and restoring Pin B reattaches Toolbar B above Pin B and orders both above Pin A",
+            detail: "detachedWhileClipped=\(detachedWhileClipped), indices: tbB=\(idxTbB3), pinB=\(idxPinB3), tbA=\(idxTbA3)"
+        )
+
+        pinPanelB.onClosePanel?()
+        pinPanel.makeKeyAndOrderFront(nil)
+        vm.updateToolbarPanelPosition()
+    }
 
     // Verify 4A: Image rect & all 8 handle hit-testing
     let imgRect = canvas.imageRectInView
@@ -603,7 +796,7 @@ func runAllTests() -> Int32 {
         detail: "toolbarMaxY=\(toolbarMaxY), bottomHandleScreenY=\(bottomHandleScreenY)"
     )
 
-    // Verify full-screen pin keeps toolbar panel within visible screen bounds
+    // Verify full-screen pin keeps toolbar panel within visible screen bounds and dodges bottom inline text editor
     let mainScreen = pinPanel.screen ?? NSScreen.main ?? NSScreen.screens.first
     if let mainScreen {
         let fullFrame = PinSessionViewModel.panelFrameForImageScreenRect(mainScreen.frame)
@@ -615,8 +808,29 @@ func runAllTests() -> Int32 {
             "Full-screen pin clamps toolbar panel inside visible screen bounds instead of off-screen above menu bar",
             detail: "tbPanel.frame=\(tbPanel.frame), visibleFrame=\(mainScreen.visibleFrame)"
         )
+        canvas.showInlineTextField(atNormalized: CGPoint(x: 0.05, y: 0.96), in: canvas.imageRectInView, initialText: "Bottom Edit")
+        if let fieldRect = canvas.pendingFieldHitRect() {
+            let fieldOnScreen = pinPanel.convertToScreen(canvas.convert(fieldRect, to: nil))
+            t.check(
+                !tbPanel.frame.intersects(fieldOnScreen),
+                "Full-screen toolbar dodges bottom inline text editor so it never covers active text input",
+                detail: "tbPanel.frame=\(tbPanel.frame), fieldOnScreen=\(fieldOnScreen)"
+            )
+        }
+        vm.cancelPendingTextEditing()
         pinPanel.setFrame(panelFrame, display: false)
         vm.updateToolbarPanelPosition()
+    }
+    if let repeatPinSpace = NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+        context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: true, keyCode: 49
+    ) {
+        let initialToolbarVisible = vm.showToolbar
+        pinPanel.keyDown(with: repeatPinSpace)
+        t.check(
+            vm.showToolbar == initialToolbarVisible,
+            "Auto-repeated Space keyDown on PinFloatingPanel does not toggle toolbar visibility"
+        )
     }
 
     let handlePts = canvas.handlePointsInView()

@@ -203,6 +203,9 @@ final class PinSessionViewModel: ObservableObject {
     func updateToolbarPanelPosition() {
         guard let imgPanel = hostingPanel, let tbPanel = toolbarPanel else { return }
         if !showToolbar || !imgPanel.isVisible {
+            if imgPanel.childWindows?.contains(tbPanel) == true {
+                imgPanel.removeChildWindow(tbPanel)
+            }
             tbPanel.orderOut(nil)
             return
         }
@@ -246,12 +249,29 @@ final class PinSessionViewModel: ObservableObject {
             if aboveTopY + tbSize.height <= visible.maxY - 6 {
                 tbY = aboveTopY
             } else {
-                // Full-screen or tall pin: float the toolbar cleanly inside the bottom of the visible screen
-                tbY = round(visible.minY + 16)
+                // Full-screen or tall pin: float the toolbar cleanly inside the bottom of the visible screen,
+                // or near the top if an active inline text editor overlaps the bottom toolbar zone.
+                let bottomInsideY = round(visible.minY + 16)
+                let bottomCandidate = NSRect(x: tbX, y: bottomInsideY, width: tbSize.width, height: tbSize.height)
+                if let cv = imgPanel.canvasView,
+                   let fieldRect = cv.pendingFieldHitRect() {
+                    let fieldInWindow = cv.convert(fieldRect, to: nil)
+                    let fieldOnScreen = imgPanel.convertToScreen(fieldInWindow).insetBy(dx: -8, dy: -8)
+                    if bottomCandidate.intersects(fieldOnScreen) {
+                        tbY = round(visible.maxY - tbSize.height - 16)
+                    } else {
+                        tbY = bottomInsideY
+                    }
+                } else {
+                    tbY = bottomInsideY
+                }
             }
         }
 
         tbPanel.setFrameOrigin(NSPoint(x: tbX, y: tbY))
+        if imgPanel.childWindows?.contains(tbPanel) != true {
+            imgPanel.addChildWindow(tbPanel, ordered: .above)
+        }
         if !tbPanel.isVisible {
             tbPanel.orderFrontRegardless()
         } else {
@@ -377,6 +397,7 @@ final class PinSessionViewModel: ObservableObject {
             cv.window?.invalidateCursorRects(for: cv)
             cv.needsDisplay = true
         }
+        updateToolbarPanelPosition()
     }
 
     func commitPendingText() {
@@ -425,6 +446,7 @@ final class PinSessionViewModel: ObservableObject {
             cv.window?.invalidateCursorRects(for: cv)
             cv.needsDisplay = true
         }
+        updateToolbarPanelPosition()
     }
 
     func renderCompositeImage() -> NSImage? {

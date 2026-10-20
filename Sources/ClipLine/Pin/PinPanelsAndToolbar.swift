@@ -301,6 +301,7 @@ final class PinFloatingPanel: NSPanel {
 
     override func becomeKey() {
         super.becomeKey()
+        orderFront(nil)
         if let vm = viewModel, vm.showToolbar, let tbPanel = vm.toolbarPanel, tbPanel.isVisible {
             tbPanel.order(.above, relativeTo: windowNumber)
         }
@@ -359,6 +360,7 @@ final class PinFloatingPanel: NSPanel {
             return
         }
         if event.keyCode == 49 {
+            guard !event.isARepeat else { return }
             vm.showToolbar.toggle()
             return
         }

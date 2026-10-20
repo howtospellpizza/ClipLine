@@ -335,7 +335,7 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
             defer: false
         )
         tbPanel.isFloatingPanel = true
-        tbPanel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
+        tbPanel.level = .floating
         tbPanel.animationBehavior = .none
         tbPanel.backgroundColor = .clear
         tbPanel.isOpaque = false
@@ -348,6 +348,9 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
         let closeClosure: () -> Void = { [weak self, weak vm, weak panel, weak tbPanel] in
             vm?.isClosed = true
             vm?.cancelActiveOCR()
+            if let panel, let tbPanel, panel.childWindows?.contains(tbPanel) == true {
+                panel.removeChildWindow(tbPanel)
+            }
             tbPanel?.orderOut(nil)
             panel?.orderOut(nil)
             self?.activeToolbars.removeValue(forKey: id)

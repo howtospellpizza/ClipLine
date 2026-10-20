@@ -136,6 +136,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         vm.pendingTextNormalizedPos = CGPoint(x: actualNormX, y: actualNormY)
         tf.frame = NSRect(x: clampedX, y: clampedY, width: fieldW, height: fieldH)
         window?.invalidateCursorRects(for: self)
+        vm.updateToolbarPanelPosition()
     }
 
     /// Bounding rect in view coordinates (bottom-left origin) for a committed `.text` or `.counter` annotation
@@ -322,10 +323,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
     }
 
     override func mouseDown(with event: NSEvent) {
-        window?.makeKey()
-        if vm.showToolbar, let imgPanel = window, let tbPanel = vm.toolbarPanel, tbPanel.isVisible {
-            tbPanel.order(.above, relativeTo: imgPanel.windowNumber)
-        }
+        window?.makeKeyAndOrderFront(nil)
         let pt = convert(event.locationInWindow, from: nil)
         let screenPt = NSEvent.mouseLocation
 
