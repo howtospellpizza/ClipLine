@@ -26,6 +26,7 @@ enum SingleInstanceLock {
             fputs("[ClipLine] Error: Unable to open lock file at \(path) (errno \(errno))\n", stderr)
             return false
         }
+        _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
         if flock(fd, LOCK_EX | LOCK_NB) == 0 {
             lockFD = fd
             let pidStr = "\(getpid())\n"
@@ -45,6 +46,13 @@ enum SingleInstanceLock {
             }
         }
         return false
+    }
+
+    static func releaseLockIfHeld() {
+        guard lockFD >= 0 else { return }
+        _ = flock(lockFD, LOCK_UN)
+        close(lockFD)
+        lockFD = -1
     }
 }
 

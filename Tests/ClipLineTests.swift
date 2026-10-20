@@ -171,6 +171,56 @@ func runAllTests() -> Int32 {
         detail: "got \(panelFrame)"
     )
 
+    let deniedCaptureController = ScreenCaptureOverlayController()
+    var preflightChecks = 0
+    var requestAttempts = 0
+    var alertPresentations = 0
+    deniedCaptureController.preflightAccess = {
+        preflightChecks += 1
+        return false
+    }
+    deniedCaptureController.requestAccess = {
+        requestAttempts += 1
+        return false
+    }
+    deniedCaptureController.presentPermissionAlert = {
+        alertPresentations += 1
+    }
+    let launchPermissionGranted = deniedCaptureController.ensureScreenCaptureAccess(showAlertOnDenial: false)
+    t.check(
+        !launchPermissionGranted && requestAttempts == 1 && alertPresentations == 0,
+        "Launch permission check triggers CGRequestScreenCaptureAccess without blocking on modal alert"
+    )
+    var deniedCaptureCompletedWithNil = false
+    deniedCaptureController.beginCapture { result in
+        deniedCaptureCompletedWithNil = (result == nil)
+    }
+    t.check(
+        deniedCaptureCompletedWithNil && requestAttempts == 2 && alertPresentations == 1 && preflightChecks >= 2,
+        "beginCapture aborts before showing wallpaper-only fullscreen overlay when Screen Recording permission is denied"
+    )
+
+    var openedSettingsFromHUD = false
+    var revealedBinaryFromHUD = false
+    var dismissedHUD = false
+    let hudPanel = ScreenCaptureOverlayController.makeScreenRecordingPermissionPanel(
+        onOpenSettings: { openedSettingsFromHUD = true },
+        onRevealBinary: { revealedBinaryFromHUD = true },
+        onDismiss: {
+            dismissedHUD = true
+            ScreenCaptureOverlayController.dismissScreenRecordingPermissionAlert()
+        }
+    )
+    t.check(
+        hudPanel.styleMask.contains(.borderless) && !hudPanel.isOpaque && hudPanel.contentView != nil,
+        "makeScreenRecordingPermissionPanel builds borderless translucent HUD card instead of default generic folder NSAlert"
+    )
+    hudPanel.cancelOperation(nil)
+    t.check(
+        dismissedHUD && !openedSettingsFromHUD && !revealedBinaryFromHUD,
+        "Permission HUD card dismisses cleanly on Escape/cancelOperation"
+    )
+
     // -------------------------------------------------------------------------
     // Suite 2: Lazy CIPixellate Mosaic Pixel Verification & Fail-Closed Redaction
     // -------------------------------------------------------------------------

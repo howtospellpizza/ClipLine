@@ -491,9 +491,9 @@ enum L10n {
     static var alertScreenRecordingBody: String {
         switch AppLanguage.current {
         case .en:
-            return "Please open System Settings → Privacy & Security → Screen & System Audio Recording, enable your terminal or the clipline binary, and try again."
+            return "Please open System Settings → Privacy & Security → Screen & System Audio Recording, enable your terminal (e.g. Ghostty / iTerm2) or the clipline binary, then restart clipline and try again."
         case .zhHans:
-            return "请前往「系统设置 → 隐私与安全性 → 屏幕与系统音频录制」，勾选允许当前终端或 ClipLine 可执行程序后重试。"
+            return "请前往「系统设置 → 隐私与安全性 → 录屏与系统录音」，勾选允许当前终端（如 Ghostty / iTerm2）或 clipline 可执行程序，重启 clipline 后再试。"
         }
     }
 
@@ -501,6 +501,20 @@ enum L10n {
         switch AppLanguage.current {
         case .en: return "Open System Settings"
         case .zhHans: return "打开系统设置"
+        }
+    }
+
+    static var alertRevealBinaryButton: String {
+        switch AppLanguage.current {
+        case .en: return "Reveal clipline"
+        case .zhHans: return "定位 clipline"
+        }
+    }
+
+    static var alertRelaunchButton: String {
+        switch AppLanguage.current {
+        case .en: return "Relaunch Now"
+        case .zhHans: return "已授权，立即重启"
         }
     }
 

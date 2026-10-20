@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import Darwin
 import Foundation
+import SwiftUI
 
 // MARK: - Zero-Flicker In-Memory Screen Capture & Region Selector
 
@@ -9,6 +10,9 @@ import Foundation
 final class ScreenCaptureOverlayController {
     private var overlayWindow: NSPanel?
     private var completion: ((CaptureSelectionResult?) -> Void)?
+    var preflightAccess: () -> Bool = { CGPreflightScreenCaptureAccess() }
+    var requestAccess: () -> Bool = { CGRequestScreenCaptureAccess() }
+    var presentPermissionAlert: () -> Void = { ScreenCaptureOverlayController.presentScreenRecordingPermissionAlertIfNeeded() }
 
     private static let cgDisplayCreateImageFn: (@convention(c) (CGDirectDisplayID) -> Unmanaged<CGImage>?)? = {
         guard let handle = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_LAZY),
@@ -16,17 +20,32 @@ final class ScreenCaptureOverlayController {
         return unsafeBitCast(sym, to: (@convention(c) (CGDirectDisplayID) -> Unmanaged<CGImage>?).self)
     }()
 
+    @discardableResult
+    func ensureScreenCaptureAccess(showAlertOnDenial: Bool) -> Bool {
+        if preflightAccess() {
+            return true
+        }
+        if requestAccess() || preflightAccess() {
+            return true
+        }
+        if showAlertOnDenial {
+            presentPermissionAlert()
+        }
+        return false
+    }
+
     func beginCapture(completion: @escaping (CaptureSelectionResult?) -> Void) {
+        guard ensureScreenCaptureAccess(showAlertOnDenial: true) else {
+            completion(nil)
+            return
+        }
+
         let mouse = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main,
               let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
         else {
             completion(nil)
             return
-        }
-
-        if !CGPreflightScreenCaptureAccess() {
-            _ = CGRequestScreenCaptureAccess()
         }
 
         let cgScreenshot: CGImage
@@ -107,19 +126,268 @@ final class ScreenCaptureOverlayController {
         cb?(result)
     }
 
+    private static var permissionHUDPanel: NSPanel?
+
+    nonisolated static func currentExecutableFileURL() -> URL {
+        if let execURL = Bundle.main.executableURL {
+            return execURL.resolvingSymlinksInPath()
+        }
+        let arg0 = CommandLine.arguments.first ?? "~/.local/bin/clipline"
+        let expanded = NSString(string: arg0).expandingTildeInPath
+        return URL(fileURLWithPath: expanded).resolvingSymlinksInPath()
+    }
+
+    static func dismissScreenRecordingPermissionAlert() {
+        permissionHUDPanel?.orderOut(nil)
+        permissionHUDPanel = nil
+    }
+
+    static func relaunchCurrentDaemonProcess() {
+        let executableURL = currentExecutableFileURL()
+        let proc = Process()
+        proc.executableURL = executableURL
+        proc.arguments = []
+        proc.environment = ProcessInfo.processInfo.environment
+        proc.standardInput = FileHandle.nullDevice
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        SingleInstanceLock.releaseLockIfHeld()
+        do {
+            try proc.run()
+            exit(0)
+        } catch {
+            _ = SingleInstanceLock.acquireOrNotifyExisting(notifyExisting: false)
+        }
+    }
+
+    @discardableResult
+    static func makeScreenRecordingPermissionPanel(
+        onOpenSettings: (() -> Void)? = nil,
+        onRevealBinary: (() -> Void)? = nil,
+        onRelaunch: (() -> Void)? = nil,
+        onDismiss: (() -> Void)? = nil
+    ) -> NSPanel {
+        dismissScreenRecordingPermissionAlert()
+
+        let openSettingsAction = onOpenSettings ?? {
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+        let revealBinaryAction = onRevealBinary ?? {
+            let fileURL = currentExecutableFileURL()
+            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+        }
+        let relaunchAction = onRelaunch ?? {
+            relaunchCurrentDaemonProcess()
+        }
+        let dismissAction = onDismiss ?? {
+            dismissScreenRecordingPermissionAlert()
+        }
+
+        let cardWidth: CGFloat = 468
+        let cardHeight: CGFloat = 198
+        let screen = NSScreen.main ?? NSScreen.screens.first
+        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let frame = NSRect(
+            x: round(visible.midX - cardWidth / 2),
+            y: round(visible.midY - cardHeight / 2 + 80),
+            width: cardWidth,
+            height: cardHeight
+        )
+
+        let panel = PermissionNoticeHUDPanel(
+            contentRect: frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.level = .screenSaver
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isMovableByWindowBackground = true
+        panel.onEscape = dismissAction
+
+        let rootView = ScreenRecordingPermissionHUDView(
+            onOpenSettings: {
+                openSettingsAction()
+            },
+            onRevealBinary: {
+                revealBinaryAction()
+            },
+            onRelaunch: {
+                dismissAction()
+                relaunchAction()
+            },
+            onClose: dismissAction
+        )
+        let hosting = NSHostingView(rootView: rootView)
+        hosting.frame = NSRect(origin: .zero, size: frame.size)
+        panel.contentView = hosting
+        permissionHUDPanel = panel
+        return panel
+    }
+
     static func presentScreenRecordingPermissionAlertIfNeeded() {
         guard !CGPreflightScreenCaptureAccess() else { return }
         NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = L10n.alertScreenRecordingTitle
-        alert.informativeText = L10n.alertScreenRecordingBody
-        alert.addButton(withTitle: L10n.alertOpenSystemSettingsButton)
-        alert.addButton(withTitle: L10n.alertCancelButton)
-        if alert.runModal() == .alertFirstButtonReturn,
-           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-            NSWorkspace.shared.open(url)
+        let panel = makeScreenRecordingPermissionPanel()
+        panel.makeKeyAndOrderFront(nil)
+    }
+}
+
+final class PermissionNoticeHUDPanel: NSPanel {
+    var onEscape: (() -> Void)?
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+
+    override func cancelOperation(_ sender: Any?) {
+        onEscape?()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            onEscape?()
+            return
         }
+        super.keyDown(with: event)
+    }
+}
+
+struct ScreenRecordingPermissionHUDView: View {
+    let onOpenSettings: () -> Void
+    let onRevealBinary: () -> Void
+    let onRelaunch: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.16, green: 0.56, blue: 0.98),
+                                    Color(red: 0.10, green: 0.38, blue: 0.84)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 40, height: 40)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.24), lineWidth: 0.8)
+                        )
+
+                    Image(systemName: "viewfinder.rectangular")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundColor(.white)
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(L10n.alertScreenRecordingTitle)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.primary)
+
+                    Text(L10n.alertScreenRecordingBody)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineSpacing(2)
+                }
+
+                Spacer(minLength: 4)
+
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(Color.primary.opacity(0.08)))
+                }
+                .buttonStyle(.plain)
+                .help(L10n.alertCancelButton)
+            }
+
+            Divider()
+                .opacity(0.45)
+
+            HStack(spacing: 8) {
+                Button(action: onRevealBinary) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 11.5, weight: .semibold))
+                        Text(L10n.alertRevealBinaryButton)
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.primary.opacity(0.10))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.6)
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Button(action: onRelaunch) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11.5, weight: .semibold))
+                        Text(L10n.alertRelaunchButton)
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .padding(.horizontal, 11)
+                    .frame(height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.primary.opacity(0.10))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.6)
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Button(action: onOpenSettings) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 11.5, weight: .semibold))
+                        Text(L10n.alertOpenSystemSettingsButton)
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .frame(height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.accentColor)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .frame(width: 456)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.28), radius: 12, x: 0, y: 4)
+        .padding(6)
     }
 }
 

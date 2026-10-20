@@ -87,6 +87,7 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
             )
         }
         if openSettingsOnLaunch { showShortcutSettings() }
+        _ = captureController.ensureScreenCaptureAccess(showAlertOnDenial: false)
     }
 
     @objc private func handleExternalCaptureTrigger(_ note: Notification) {
