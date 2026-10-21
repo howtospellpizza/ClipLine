@@ -8,8 +8,9 @@ import SwiftUI
 
 @MainActor
 final class ScreenCaptureOverlayController {
-    private var overlayWindow: NSPanel?
+    private(set) var overlayWindows: [NSPanel] = []
     private var completion: ((CaptureSelectionResult?) -> Void)?
+    private var isCursorHidden = false
     var preflightAccess: () -> Bool = { CGPreflightScreenCaptureAccess() }
     var requestAccess: () -> Bool = { CGRequestScreenCaptureAccess() }
     var presentPermissionAlert: () -> Void = { ScreenCaptureOverlayController.presentScreenRecordingPermissionAlertIfNeeded() }
@@ -34,95 +35,178 @@ final class ScreenCaptureOverlayController {
         return false
     }
 
+    private func captureDisplayImage(for screen: NSScreen, displayIndex: Int) -> CGImage? {
+        guard let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
+            return nil
+        }
+        if let fn = Self.cgDisplayCreateImageFn, let unmanaged = fn(displayID) {
+            return unmanaged.takeRetainedValue()
+        }
+        let tempSnap = ClipboardHelper.uniqueTempFileURL(prefix: "clipline_snap_full_\(displayIndex)").path
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        proc.arguments = ["-x", "-D", "\(displayIndex)", tempSnap]
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+        } catch {
+            try? FileManager.default.removeItem(atPath: tempSnap)
+            return nil
+        }
+        guard proc.terminationStatus == 0,
+              let img = NSImage(contentsOfFile: tempSnap),
+              let tiff = img.tiffRepresentation,
+              let bmp = NSBitmapImageRep(data: tiff),
+              let cg = bmp.cgImage else {
+            try? FileManager.default.removeItem(atPath: tempSnap)
+            return nil
+        }
+        try? FileManager.default.removeItem(atPath: tempSnap)
+        return cg
+    }
+
     func beginCapture(completion: @escaping (CaptureSelectionResult?) -> Void) {
         guard ensureScreenCaptureAccess(showAlertOnDenial: true) else {
             completion(nil)
             return
         }
 
-        let mouse = NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main,
-              let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
-        else {
+        let allScreens = NSScreen.screens
+        guard !allScreens.isEmpty else {
             completion(nil)
             return
         }
 
-        let cgScreenshot: CGImage
-        if let fn = Self.cgDisplayCreateImageFn, let unmanaged = fn(displayID) {
-            cgScreenshot = unmanaged.takeRetainedValue()
-        } else {
-            let displayIndex = (NSScreen.screens.firstIndex(of: screen) ?? 0) + 1
-            let tempSnap = ClipboardHelper.uniqueTempFileURL(prefix: "clipline_snap_full").path
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-            proc.arguments = ["-x", "-D", "\(displayIndex)", tempSnap]
-            do {
-                try proc.run()
-                proc.waitUntilExit()
-            } catch {
-                try? FileManager.default.removeItem(atPath: tempSnap)
-                completion(nil)
-                return
+        let mouse = NSEvent.mouseLocation
+        let initialScreen = allScreens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main ?? allScreens[0]
+        let crosshairConfig = CrosshairConfigurationStore().load()
+
+        var descriptors: [(screenFrame: NSRect, cgImage: CGImage, candidateWindowRects: [NSRect], isInitialCursorScreen: Bool)] = []
+        for (idx, screen) in allScreens.enumerated() {
+            guard let cgScreenshot = captureDisplayImage(for: screen, displayIndex: idx + 1) else {
+                continue
             }
-            guard proc.terminationStatus == 0,
-                  let img = NSImage(contentsOfFile: tempSnap),
-                  let tiff = img.tiffRepresentation,
-                  let bmp = NSBitmapImageRep(data: tiff),
-                  let cg = bmp.cgImage else {
-                try? FileManager.default.removeItem(atPath: tempSnap)
-                Self.presentScreenRecordingPermissionAlertIfNeeded()
-                completion(nil)
-                return
-            }
-            try? FileManager.default.removeItem(atPath: tempSnap)
-            cgScreenshot = cg
+            let candidateWindows = Self.detectVisibleWindowRectsInView(for: screen)
+            descriptors.append((
+                screenFrame: screen.frame,
+                cgImage: cgScreenshot,
+                candidateWindowRects: candidateWindows,
+                isInitialCursorScreen: screen == initialScreen
+            ))
         }
 
-        let frozenImage = NSImage(cgImage: cgScreenshot, size: screen.frame.size)
-        let scaleFactor = CGFloat(cgScreenshot.width) / screen.frame.width
-        let candidateWindows = Self.detectVisibleWindowRectsInView(for: screen)
-        self.completion = completion
+        guard descriptors.contains(where: { $0.isInitialCursorScreen }) else {
+            Self.presentScreenRecordingPermissionAlertIfNeeded()
+            completion(nil)
+            return
+        }
 
-        let panel = CaptureOverlayPanel(
-            contentRect: screen.frame,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
+        installCaptureOverlays(
+            descriptors: descriptors,
+            crosshairConfig: crosshairConfig,
+            hideSystemCursor: true,
+            completion: completion
         )
-        panel.level = .screenSaver
-        panel.isOpaque = true
-        panel.backgroundColor = .clear
-        panel.hasShadow = false
-        panel.animationBehavior = .none
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-
-        let view = PixPinSelectionView(
-            frame: NSRect(origin: .zero, size: screen.frame.size),
-            screenOrigin: screen.frame.origin,
-            frozenImage: frozenImage,
-            cgImage: cgScreenshot,
-            scaleFactor: scaleFactor,
-            candidateWindowRects: candidateWindows,
-            onFinish: { [weak self] result in
-                self?.finish(with: result)
-            }
-        )
-        panel.contentView = view
-        self.overlayWindow = panel
-
-        view.display()
-        NSCursor.hide()
-        NSApp.activate(ignoringOtherApps: true)
-        panel.orderFrontRegardless()
-        panel.makeKey()
-        panel.makeFirstResponder(view)
     }
 
-    private func finish(with result: CaptureSelectionResult?) {
-        NSCursor.unhide()
-        overlayWindow?.orderOut(nil)
-        overlayWindow = nil
+    func installCaptureOverlays(
+        descriptors: [(screenFrame: NSRect, cgImage: CGImage, candidateWindowRects: [NSRect], isInitialCursorScreen: Bool)],
+        crosshairConfig: CrosshairConfiguration = .defaults,
+        hideSystemCursor: Bool = false,
+        completion: @escaping (CaptureSelectionResult?) -> Void
+    ) {
+        guard descriptors.contains(where: { $0.isInitialCursorScreen }) else {
+            presentPermissionAlert()
+            completion(nil)
+            return
+        }
+
+        var createdPanels: [(isInitial: Bool, panel: CaptureOverlayPanel, view: PixPinSelectionView)] = []
+        for desc in descriptors {
+            let frozenImage = NSImage(cgImage: desc.cgImage, size: desc.screenFrame.size)
+            let scaleFactor = CGFloat(desc.cgImage.width) / max(1.0, desc.screenFrame.width)
+
+            let panel = CaptureOverlayPanel(
+                contentRect: desc.screenFrame,
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            panel.level = .screenSaver
+            panel.isOpaque = true
+            panel.backgroundColor = .clear
+            panel.hasShadow = false
+            panel.animationBehavior = .none
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            panel.acceptsMouseMovedEvents = true
+
+            let view = PixPinSelectionView(
+                frame: NSRect(origin: .zero, size: desc.screenFrame.size),
+                screenOrigin: desc.screenFrame.origin,
+                frozenImage: frozenImage,
+                cgImage: desc.cgImage,
+                scaleFactor: scaleFactor,
+                candidateWindowRects: desc.candidateWindowRects,
+                crosshairConfig: crosshairConfig,
+                isCursorInsideScreen: desc.isInitialCursorScreen,
+                onActivateScreen: { [weak self] activeView in
+                    self?.activateOverlayView(activeView)
+                },
+                onFinish: { [weak self] result in
+                    self?.finish(with: result)
+                }
+            )
+            panel.contentView = view
+            createdPanels.append((desc.isInitialCursorScreen, panel, view))
+        }
+
+        self.completion = completion
+        self.overlayWindows = createdPanels.map { $0.panel }
+
+        if hideSystemCursor && !isCursorHidden {
+            NSCursor.hide()
+            isCursorHidden = true
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        for item in createdPanels {
+            item.view.display()
+            item.panel.orderFrontRegardless()
+        }
+        if let initialItem = createdPanels.first(where: { $0.isInitial }) {
+            initialItem.panel.makeKey()
+            initialItem.panel.makeFirstResponder(initialItem.view)
+        }
+    }
+
+    func activateOverlayView(_ activeView: PixPinSelectionView) {
+        for panel in overlayWindows {
+            guard let view = panel.contentView as? PixPinSelectionView else { continue }
+            let isTarget = (view === activeView)
+            if !isTarget {
+                view.clearActiveDragIfNeeded()
+            }
+            if view.isCursorInsideScreen != isTarget {
+                view.isCursorInsideScreen = isTarget
+                view.needsDisplay = true
+            }
+            if isTarget {
+                if !panel.isKeyWindow {
+                    panel.makeKey()
+                }
+                panel.makeFirstResponder(view)
+            }
+        }
+    }
+
+    func finish(with result: CaptureSelectionResult?) {
+        if isCursorHidden {
+            NSCursor.unhide()
+            isCursorHidden = false
+        }
+        for panel in overlayWindows {
+            panel.orderOut(nil)
+        }
+        overlayWindows.removeAll()
         let cb = completion
         completion = nil
         cb?(result)
@@ -485,15 +569,31 @@ final class CaptureOverlayPanel: NSPanel {
     override var canBecomeMain: Bool { true }
 }
 
+extension CrosshairColorPreset {
+    var nsColor: NSColor {
+        switch self {
+        case .cyan: return NSColor(calibratedRed: 0.25, green: 0.85, blue: 1.0, alpha: 1.0)
+        case .green: return NSColor(calibratedRed: 0.20, green: 0.92, blue: 0.45, alpha: 1.0)
+        case .red: return NSColor(calibratedRed: 1.0, green: 0.30, blue: 0.32, alpha: 1.0)
+        case .yellow: return NSColor(calibratedRed: 1.0, green: 0.84, blue: 0.18, alpha: 1.0)
+        case .white: return NSColor(calibratedWhite: 1.0, alpha: 1.0)
+        }
+    }
+}
+
 final class PixPinSelectionView: NSView {
     private let screenOrigin: NSPoint
     private let frozenImage: NSImage
     private let cgImage: CGImage
     private let scaleFactor: CGFloat
     let candidateWindowRects: [NSRect]
+    var crosshairConfig: CrosshairConfiguration
+    var isCursorInsideScreen: Bool
+    private let onActivateScreen: ((PixPinSelectionView) -> Void)?
+    var pasteboardProvider: () -> NSPasteboard = { ClotheslineManager.shared.pasteboardProvider() }
     private let onFinish: (CaptureSelectionResult?) -> Void
 
-    private var mousePos: NSPoint = .zero
+    private(set) var mousePos: NSPoint = .zero
     private var startDragPos: NSPoint? = nil
     private var currentDragPos: NSPoint? = nil
     private var trackingArea: NSTrackingArea?
@@ -505,6 +605,9 @@ final class PixPinSelectionView: NSView {
         cgImage: CGImage,
         scaleFactor: CGFloat,
         candidateWindowRects: [NSRect] = [],
+        crosshairConfig: CrosshairConfiguration = CrosshairConfigurationStore().load(),
+        isCursorInsideScreen: Bool = true,
+        onActivateScreen: ((PixPinSelectionView) -> Void)? = nil,
         onFinish: @escaping (CaptureSelectionResult?) -> Void
     ) {
         self.screenOrigin = screenOrigin
@@ -512,16 +615,57 @@ final class PixPinSelectionView: NSView {
         self.cgImage = cgImage
         self.scaleFactor = scaleFactor
         self.candidateWindowRects = candidateWindowRects
+        self.crosshairConfig = crosshairConfig
+        self.isCursorInsideScreen = isCursorInsideScreen
+        self.onActivateScreen = onActivateScreen
         self.onFinish = onFinish
         super.init(frame: frame)
         let mouseInScreen = NSEvent.mouseLocation
         self.mousePos = NSPoint(x: mouseInScreen.x - screenOrigin.x, y: mouseInScreen.y - screenOrigin.y)
     }
 
+    static func samplePixelHexColor(cgImage: CGImage, viewHeight: CGFloat, scaleFactor: CGFloat, viewPoint: NSPoint) -> (hex: String, color: NSColor)? {
+        guard cgImage.width > 0, cgImage.height > 0 else { return nil }
+        let px = max(0, min(cgImage.width - 1, Int((viewPoint.x * scaleFactor).rounded(.down))))
+        let py = max(0, min(cgImage.height - 1, Int(((viewHeight - viewPoint.y) * scaleFactor).rounded(.down))))
+        guard let onePixelCG = cgImage.cropping(to: CGRect(x: px, y: py, width: 1, height: 1)) else { return nil }
+        var pixel: [UInt8] = [0, 0, 0, 0]
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: &pixel,
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        ctx.draw(onePixelCG, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        let r = pixel[0]
+        let g = pixel[1]
+        let b = pixel[2]
+        let hex = String(format: "#%02X%02X%02X", r, g, b)
+        let nsColor = NSColor(
+            srgbRed: CGFloat(r) / 255.0,
+            green: CGFloat(g) / 255.0,
+            blue: CGFloat(b) / 255.0,
+            alpha: 1.0
+        )
+        return (hex, nsColor)
+    }
+
     required init?(coder: NSCoder) { fatalError() }
 
     override var acceptsFirstResponder: Bool { true }
     override var isOpaque: Bool { true }
+
+    func clearActiveDragIfNeeded() {
+        if startDragPos != nil || currentDragPos != nil {
+            startDragPos = nil
+            currentDragPos = nil
+            needsDisplay = true
+        }
+    }
 
     func hoveredWindowRect(at point: NSPoint) -> NSRect? {
         for rect in candidateWindowRects where rect.contains(point) {
@@ -535,7 +679,7 @@ final class PixPinSelectionView: NSView {
         if let old = trackingArea { removeTrackingArea(old) }
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseMoved, .activeAlways, .inVisibleRect],
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
@@ -543,13 +687,33 @@ final class PixPinSelectionView: NSView {
         trackingArea = area
     }
 
+    override func mouseEntered(with event: NSEvent) {
+        mousePos = convert(event.locationInWindow, from: nil)
+        isCursorInsideScreen = true
+        onActivateScreen?(self)
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if startDragPos == nil {
+            isCursorInsideScreen = false
+            needsDisplay = true
+        }
+    }
+
     override func mouseMoved(with event: NSEvent) {
         mousePos = convert(event.locationInWindow, from: nil)
+        if !isCursorInsideScreen {
+            isCursorInsideScreen = true
+            onActivateScreen?(self)
+        }
         needsDisplay = true
     }
 
     override func mouseDown(with event: NSEvent) {
         let pt = convert(event.locationInWindow, from: nil)
+        isCursorInsideScreen = true
+        onActivateScreen?(self)
         startDragPos = pt
         currentDragPos = pt
         mousePos = pt
@@ -558,8 +722,12 @@ final class PixPinSelectionView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         let pt = convert(event.locationInWindow, from: nil)
-        currentDragPos = pt
-        mousePos = pt
+        let clampedPt = NSPoint(
+            x: max(bounds.minX, min(bounds.maxX, pt.x)),
+            y: max(bounds.minY, min(bounds.maxY, pt.y))
+        )
+        currentDragPos = clampedPt
+        mousePos = clampedPt
         needsDisplay = true
     }
 
@@ -596,6 +764,16 @@ final class PixPinSelectionView: NSView {
             onFinish(nil)
             return
         }
+        let rawEnd = convert(event.locationInWindow, from: nil)
+        let inScreenBounds = rawEnd.x >= bounds.minX && rawEnd.x <= bounds.maxX && rawEnd.y >= bounds.minY && rawEnd.y <= bounds.maxY
+        if !inScreenBounds {
+            // Releasing a drag outside this display cancels the current drag rather than capturing a clipped edge strip or snapping a border window
+            startDragPos = nil
+            currentDragPos = nil
+            isCursorInsideScreen = false
+            needsDisplay = true
+            return
+        }
         let dragDistance = hypot(e.x - s.x, e.y - s.y)
         let rect: NSRect
         if dragDistance < 4.0, let snappedWindow = hoveredWindowRect(at: e),
@@ -612,11 +790,20 @@ final class PixPinSelectionView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        let flags = event.modifierFlags.intersection([.command, .control, .option])
         if event.keyCode == 53 { // Esc
             onFinish(nil)
         } else if !event.isARepeat && (event.keyCode == 49 || (event.keyCode == 0 && event.modifierFlags.contains(.command))) {
             // Space (49) or Cmd+A (0 with .command) captures the entire screen
             completeCapture(with: bounds)
+        } else if !event.isARepeat && event.keyCode == 8 && flags.isEmpty {
+            // Press 'C' while hovering to copy the center pixel's #HEX color and exit capture
+            if let sampled = Self.samplePixelHexColor(cgImage: cgImage, viewHeight: bounds.height, scaleFactor: scaleFactor, viewPoint: mousePos) {
+                let pb = pasteboardProvider()
+                pb.clearContents()
+                pb.setString(sampled.hex, forType: .string)
+            }
+            onFinish(nil)
         }
     }
 
@@ -656,22 +843,24 @@ final class PixPinSelectionView: NSView {
             if sel.width > 1 && sel.height > 1 {
                 drawHighlightedRegion(sel, showCornerHandles: true, in: ctx)
             }
-        } else {
+            drawCrosshairAndLoupe(in: ctx)
+        } else if isCursorInsideScreen {
             if let hoveredWin = hoveredWindowRect(at: mousePos), hoveredWin.width > 1, hoveredWin.height > 1 {
                 drawHighlightedRegion(hoveredWin, showCornerHandles: false, in: ctx)
             }
-            ctx.saveGState()
-            ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.42).cgColor)
-            ctx.setLineWidth(0.8)
-            ctx.move(to: CGPoint(x: 0, y: mousePos.y))
-            ctx.addLine(to: CGPoint(x: bounds.width, y: mousePos.y))
-            ctx.move(to: CGPoint(x: mousePos.x, y: 0))
-            ctx.addLine(to: CGPoint(x: mousePos.x, y: bounds.height))
-            ctx.strokePath()
-            ctx.restoreGState()
+            if crosshairConfig.style == .full {
+                ctx.saveGState()
+                ctx.setStrokeColor(crosshairConfig.color.nsColor.withAlphaComponent(0.45).cgColor)
+                ctx.setLineWidth(0.9)
+                ctx.move(to: CGPoint(x: 0, y: mousePos.y))
+                ctx.addLine(to: CGPoint(x: bounds.width, y: mousePos.y))
+                ctx.move(to: CGPoint(x: mousePos.x, y: 0))
+                ctx.addLine(to: CGPoint(x: mousePos.x, y: bounds.height))
+                ctx.strokePath()
+                ctx.restoreGState()
+            }
+            drawCrosshairAndLoupe(in: ctx)
         }
-
-        drawCrosshairAndLoupe(in: ctx)
     }
 
     private func drawHighlightedRegion(_ sel: NSRect, showCornerHandles: Bool, in ctx: CGContext) {
@@ -720,28 +909,57 @@ final class PixPinSelectionView: NSView {
     }
 
     private func drawCrosshairAndLoupe(in ctx: CGContext) {
-        ctx.saveGState()
-        ctx.setStrokeColor(NSColor.black.withAlphaComponent(0.75).cgColor)
-        ctx.setLineWidth(3.0)
-        ctx.move(to: CGPoint(x: mousePos.x - 10, y: mousePos.y))
-        ctx.addLine(to: CGPoint(x: mousePos.x + 10, y: mousePos.y))
-        ctx.move(to: CGPoint(x: mousePos.x, y: mousePos.y - 10))
-        ctx.addLine(to: CGPoint(x: mousePos.x, y: mousePos.y + 10))
-        ctx.strokePath()
+        let primaryColor = crosshairConfig.color.nsColor
 
-        ctx.setStrokeColor(NSColor(calibratedRed: 0.25, green: 0.85, blue: 1.0, alpha: 1.0).cgColor)
-        ctx.setLineWidth(1.5)
-        ctx.move(to: CGPoint(x: mousePos.x - 10, y: mousePos.y))
-        ctx.addLine(to: CGPoint(x: mousePos.x + 10, y: mousePos.y))
-        ctx.move(to: CGPoint(x: mousePos.x, y: mousePos.y - 10))
-        ctx.addLine(to: CGPoint(x: mousePos.x, y: mousePos.y + 10))
-        ctx.strokePath()
+        ctx.saveGState()
+        if crosshairConfig.style == .dotRing {
+            let ringRadius: CGFloat = 9.0
+            let ringRect = CGRect(
+                x: mousePos.x - ringRadius,
+                y: mousePos.y - ringRadius,
+                width: ringRadius * 2,
+                height: ringRadius * 2
+            )
+            ctx.setStrokeColor(NSColor.black.withAlphaComponent(0.75).cgColor)
+            ctx.setLineWidth(3.0)
+            ctx.strokeEllipse(in: ringRect)
+
+            ctx.setStrokeColor(primaryColor.cgColor)
+            ctx.setLineWidth(1.6)
+            ctx.strokeEllipse(in: ringRect)
+
+            let dotRect = CGRect(x: mousePos.x - 2.0, y: mousePos.y - 2.0, width: 4.0, height: 4.0)
+            ctx.setFillColor(primaryColor.cgColor)
+            ctx.fillEllipse(in: dotRect)
+        } else {
+            ctx.setStrokeColor(NSColor.black.withAlphaComponent(0.75).cgColor)
+            ctx.setLineWidth(3.0)
+            ctx.move(to: CGPoint(x: mousePos.x - 10, y: mousePos.y))
+            ctx.addLine(to: CGPoint(x: mousePos.x + 10, y: mousePos.y))
+            ctx.move(to: CGPoint(x: mousePos.x, y: mousePos.y - 10))
+            ctx.addLine(to: CGPoint(x: mousePos.x, y: mousePos.y + 10))
+            ctx.strokePath()
+
+            ctx.setStrokeColor(primaryColor.cgColor)
+            ctx.setLineWidth(1.5)
+            ctx.move(to: CGPoint(x: mousePos.x - 10, y: mousePos.y))
+            ctx.addLine(to: CGPoint(x: mousePos.x + 10, y: mousePos.y))
+            ctx.move(to: CGPoint(x: mousePos.x, y: mousePos.y - 10))
+            ctx.addLine(to: CGPoint(x: mousePos.x, y: mousePos.y + 10))
+            ctx.strokePath()
+        }
+
+        guard crosshairConfig.showLoupe else {
+            ctx.restoreGState()
+            return
+        }
 
         let loupeSize: CGFloat = 96
+        let badgeHeight: CGFloat = 24
         var lx = mousePos.x + 20
         var ly = mousePos.y - loupeSize - 20
         if lx + loupeSize > bounds.width - 10 { lx = mousePos.x - loupeSize - 20 }
-        if ly < 10 { ly = mousePos.y + 20 }
+        if ly - badgeHeight - 8 < 10 { ly = mousePos.y + 20 + badgeHeight + 6 }
 
         let loupeRect = CGRect(x: lx, y: ly, width: loupeSize, height: loupeSize)
         let sampleSpan: CGFloat = 24
@@ -761,7 +979,7 @@ final class PixPinSelectionView: NSView {
         NSGraphicsContext.current?.imageInterpolation = .none
         frozenImage.draw(in: loupeRect, from: srcRect, operation: .sourceOver, fraction: 1.0)
 
-        ctx.setStrokeColor(NSColor(calibratedRed: 0.25, green: 0.85, blue: 1.0, alpha: 0.85).cgColor)
+        ctx.setStrokeColor(primaryColor.withAlphaComponent(0.85).cgColor)
         ctx.setLineWidth(1.0)
         ctx.move(to: CGPoint(x: loupeRect.midX, y: loupeRect.minY))
         ctx.addLine(to: CGPoint(x: loupeRect.midX, y: loupeRect.maxY))
@@ -773,6 +991,47 @@ final class PixPinSelectionView: NSView {
         ctx.setStrokeColor(NSColor.white.cgColor)
         ctx.setLineWidth(2.0)
         ctx.strokeEllipse(in: loupeRect)
+
+        if let sampled = Self.samplePixelHexColor(cgImage: cgImage, viewHeight: bounds.height, scaleFactor: scaleFactor, viewPoint: mousePos) {
+            let pillWidth: CGFloat = 104
+            let pillRect = CGRect(
+                x: round(loupeRect.midX - pillWidth / 2),
+                y: round(loupeRect.minY - badgeHeight - 6),
+                width: pillWidth,
+                height: badgeHeight
+            )
+            let pillPath = CGPath(roundedRect: pillRect, cornerWidth: 6, cornerHeight: 6, transform: nil)
+            ctx.saveGState()
+            ctx.addPath(pillPath)
+            ctx.setFillColor(NSColor.black.withAlphaComponent(0.84).cgColor)
+            ctx.fillPath()
+            ctx.addPath(pillPath)
+            ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.22).cgColor)
+            ctx.setLineWidth(1.0)
+            ctx.strokePath()
+
+            let swatchRect = CGRect(x: pillRect.minX + 7, y: pillRect.midY - 5.5, width: 11, height: 11)
+            let swatchPath = CGPath(roundedRect: swatchRect, cornerWidth: 2.5, cornerHeight: 2.5, transform: nil)
+            ctx.addPath(swatchPath)
+            ctx.setFillColor(sampled.color.cgColor)
+            ctx.fillPath()
+            ctx.addPath(swatchPath)
+            ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.8).cgColor)
+            ctx.setLineWidth(0.8)
+            ctx.strokePath()
+            ctx.restoreGState()
+
+            let hexText = "\(sampled.hex) · C" as NSString
+            let textAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: NSColor.white
+            ]
+            let textSize = hexText.size(withAttributes: textAttrs)
+            hexText.draw(
+                at: NSPoint(x: swatchRect.maxX + 6, y: pillRect.midY - textSize.height / 2),
+                withAttributes: textAttrs
+            )
+        }
         ctx.restoreGState()
     }
 }

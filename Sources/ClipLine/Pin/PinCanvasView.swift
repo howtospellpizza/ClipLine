@@ -21,9 +21,10 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
     private var resizeStartMouseScreen: NSPoint = .zero
     private var resizeStartCropRect: NSRect = .zero
 
-    private var draggingTextAnnotationIndex: Int?
+    private var draggingTextAnnotationID: UUID?
     private var textDragStartMouseView: NSPoint = .zero
     private var textDragStartNormalizedPos: CGPoint = .zero
+    private var textDragStartNormalizedPoints: [CGPoint] = []
     private var textDragDidMove: Bool = false
 
     private var isDraggingPendingField: Bool = false
@@ -87,17 +88,24 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             return
         }
         if let selID = vm.selectedTextAnnotationID,
-           let idx = vm.annotations.firstIndex(where: { $0.id == selID && ($0.tool == .text || $0.tool == .counter) }) {
-            let isCounter = (vm.annotations[idx].tool == .counter)
-            if updateColor {
-                vm.annotations[idx].color = NSColor(vm.selectedColor)
+           let idx = vm.annotations.firstIndex(where: { $0.id == selID }) {
+            let current = vm.annotations[idx]
+            let tool = current.tool
+            let nextColor = (updateColor && tool != .mosaic) ? NSColor(vm.selectedColor) : current.color
+            let nextWidth: CGFloat = {
+                guard updatePreset else { return current.lineWidth }
+                return PinSessionViewModel.presetLineWidth(vm.strokePreset, for: tool)
+            }()
+            let nextBg: TextBackgroundStyle = (updateBackground && tool == .text) ? vm.textBackgroundStyle : current.textBackgroundStyle
+            let didChange = nextColor != current.color || abs(nextWidth - current.lineWidth) > 0.001 || nextBg != current.textBackgroundStyle
+            guard didChange else {
+                needsDisplay = true
+                return
             }
-            if updatePreset {
-                vm.annotations[idx].lineWidth = isCounter ? vm.strokePreset.counterBadgeDiameter : vm.strokePreset.textFontSize
-            }
-            if updateBackground && !isCounter {
-                vm.annotations[idx].textBackgroundStyle = vm.textBackgroundStyle
-            }
+            vm.recordUndoSnapshot()
+            vm.annotations[idx].color = nextColor
+            vm.annotations[idx].lineWidth = nextWidth
+            vm.annotations[idx].textBackgroundStyle = nextBg
             window?.invalidateCursorRects(for: self)
             needsDisplay = true
         } else {
@@ -139,7 +147,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         vm.updateToolbarPanelPosition()
     }
 
-    /// Bounding rect in view coordinates (bottom-left origin) for a committed `.text` or `.counter` annotation
+    /// Bounding rect in view coordinates (bottom-left origin) for any committed annotation
     func textAnnotationHitRectInView(_ item: PinAnnotation) -> NSRect? {
         guard let normPt = item.points.first else { return nil }
         let imgRect = imageRectInView
@@ -150,32 +158,109 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             let vy = imgRect.maxY - normPt.y * imgRect.height
             return NSRect(x: vx - radius, y: vy - radius, width: radius * 2.0, height: radius * 2.0)
         }
-        guard item.tool == .text else { return nil }
-        let fontSize = max(12.0, item.lineWidth) * vm.scale
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: fontSize, weight: .bold)
-        ]
-        let textSize = (item.text as NSString).size(withAttributes: attrs)
-        // In drawAnnotationInCGContext, normPt is the TOP-LEFT corner of the text box,
-        // so in bottom-left view coordinates the text box spans:
-        // x: [vx, vx + textSize.width], y: [vy - textSize.height, vy]
-        let vx = imgRect.minX + normPt.x * imgRect.width
-        let vy = imgRect.maxY - normPt.y * imgRect.height
-        let padX: CGFloat = item.textBackgroundStyle == .transparent ? 8 : 10
-        let padY: CGFloat = item.textBackgroundStyle == .transparent ? 6 : 8
-        return NSRect(
-            x: vx - padX,
-            y: vy - textSize.height - padY,
-            width: max(32, textSize.width + padX * 2),
-            height: max(24, textSize.height + padY * 2)
-        )
+        if item.tool == .text {
+            let fontSize = max(12.0, item.lineWidth) * vm.scale
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: fontSize, weight: .bold)
+            ]
+            let textSize = (item.text as NSString).size(withAttributes: attrs)
+            // In drawAnnotationInCGContext, normPt is the TOP-LEFT corner of the text box,
+            // so in bottom-left view coordinates the text box spans:
+            // x: [vx, vx + textSize.width], y: [vy - textSize.height, vy]
+            let vx = imgRect.minX + normPt.x * imgRect.width
+            let vy = imgRect.maxY - normPt.y * imgRect.height
+            let padX: CGFloat = item.textBackgroundStyle == .transparent ? 8 : 10
+            let padY: CGFloat = item.textBackgroundStyle == .transparent ? 6 : 8
+            return NSRect(
+                x: vx - padX,
+                y: vy - textSize.height - padY,
+                width: max(32, textSize.width + padX * 2),
+                height: max(24, textSize.height + padY * 2)
+            )
+        }
+        guard item.points.count >= 2 else { return nil }
+        let viewPts = item.points.map {
+            NSPoint(
+                x: imgRect.minX + $0.x * imgRect.width,
+                y: imgRect.maxY - $0.y * imgRect.height
+            )
+        }
+        let minX = viewPts.map(\.x).min() ?? 0
+        let maxX = viewPts.map(\.x).max() ?? 0
+        let minY = viewPts.map(\.y).min() ?? 0
+        let maxY = viewPts.map(\.y).max() ?? 0
+        let pad = max(6.0, (item.lineWidth * vm.scale) / 2.0 + 4.0)
+        return NSRect(x: minX - pad, y: minY - pad, width: max(12, maxX - minX + pad * 2), height: max(12, maxY - minY + pad * 2))
     }
 
-    func hitTestTextAnnotationIndex(viewPoint: NSPoint) -> Int? {
+    private func distanceFromPoint(_ p: NSPoint, toSegmentStart a: NSPoint, end b: NSPoint) -> CGFloat {
+        let dx = b.x - a.x
+        let dy = b.y - a.y
+        let lenSq = dx * dx + dy * dy
+        guard lenSq > 0.0001 else { return hypot(p.x - a.x, p.y - a.y) }
+        let t = max(0.0, min(1.0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq))
+        let projX = a.x + t * dx
+        let projY = a.y + t * dy
+        return hypot(p.x - projX, p.y - projY)
+    }
+
+    private func hitTestAnnotationItem(_ item: PinAnnotation, viewPoint: NSPoint) -> Bool {
+        if item.tool == .text || item.tool == .counter {
+            return textAnnotationHitRectInView(item)?.contains(viewPoint) == true
+        }
+        guard item.points.count >= 2 else { return false }
+        let imgRect = imageRectInView
+        let viewPts = item.points.map {
+            NSPoint(
+                x: imgRect.minX + $0.x * imgRect.width,
+                y: imgRect.maxY - $0.y * imgRect.height
+            )
+        }
+        let tol = max(7.0, (item.lineWidth * vm.scale) / 2.0 + 5.0)
+        switch item.tool {
+        case .rect:
+            let p0 = viewPts[0]
+            let p1 = viewPts[viewPts.count - 1]
+            let rect = NSRect(
+                x: min(p0.x, p1.x),
+                y: min(p0.y, p1.y),
+                width: abs(p1.x - p0.x),
+                height: abs(p1.y - p0.y)
+            )
+            let outer = rect.insetBy(dx: -tol, dy: -tol)
+            guard outer.contains(viewPoint) else { return false }
+            if rect.width > tol * 2 && rect.height > tol * 2 {
+                let inner = rect.insetBy(dx: tol, dy: tol)
+                return !inner.contains(viewPoint)
+            }
+            return true
+        case .arrow:
+            let p0 = viewPts[0]
+            let p1 = viewPts[viewPts.count - 1]
+            if distanceFromPoint(viewPoint, toSegmentStart: p0, end: p1) <= tol + 2.0 {
+                return true
+            }
+            let headRadius = max(12.0, item.lineWidth * 3.4) * vm.scale * 0.55 + 4.0
+            return hypot(viewPoint.x - p1.x, viewPoint.y - p1.y) <= headRadius
+        case .pen, .highlighter, .mosaic:
+            for i in 0..<(viewPts.count - 1) {
+                if distanceFromPoint(viewPoint, toSegmentStart: viewPts[i], end: viewPts[i + 1]) <= tol {
+                    return true
+                }
+            }
+            return false
+        case .text, .counter:
+            return false
+        }
+    }
+
+    func hitTestTextAnnotationIndex(viewPoint: NSPoint, includeAllShapes: Bool = true) -> Int? {
         for idx in vm.annotations.indices.reversed() {
             let item = vm.annotations[idx]
-            if let rect = textAnnotationHitRectInView(item), rect.contains(viewPoint) {
-                return idx
+            if item.tool == .text || item.tool == .counter || includeAllShapes || vm.activeTool == nil || vm.selectedTextAnnotationID == item.id {
+                if hitTestAnnotationItem(item, viewPoint: viewPoint) {
+                    return idx
+                }
             }
         }
         return nil
@@ -256,7 +341,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
 
     override func resetCursorRects() {
         super.resetCursorRects()
-        for item in vm.annotations where item.tool == .text || item.tool == .counter {
+        for item in vm.annotations {
             if let rect = textAnnotationHitRectInView(item) {
                 addCursorRect(rect, cursor: NSCursor.openHand)
             }
@@ -285,7 +370,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             handle.cursor.set()
             return
         }
-        if draggingTextAnnotationIndex != nil || isDraggingPendingField {
+        if draggingTextAnnotationID != nil || isDraggingPendingField {
             NSCursor.closedHand.set()
             return
         }
@@ -350,11 +435,11 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         let imgRect = imageRectInView
         guard imgRect.contains(pt) else { return }
 
-        // 2. Check if clicking/dragging ANY existing text or step-counter annotation (works regardless of activeTool!)
+        // 2. Check if clicking/dragging ANY existing annotation (.text/.counter always; other shapes when activeTool == nil or already selected)
         if let initialHitIdx = hitTestTextAnnotationIndex(viewPoint: pt) {
             let clickedAnnotationID = vm.annotations[initialHitIdx].id
             vm.commitPendingText()
-            guard let resolvedHitIdx = vm.annotations.firstIndex(where: { $0.id == clickedAnnotationID && ($0.tool == .text || $0.tool == .counter) }) else {
+            guard let resolvedHitIdx = vm.annotations.firstIndex(where: { $0.id == clickedAnnotationID }) else {
                 needsDisplay = true
                 return
             }
@@ -375,9 +460,10 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
                 needsDisplay = true
                 return
             }
-            draggingTextAnnotationIndex = resolvedHitIdx
+            draggingTextAnnotationID = hitItem.id
             textDragStartMouseView = pt
             textDragStartNormalizedPos = hitItem.points.first ?? .zero
+            textDragStartNormalizedPoints = hitItem.points
             textDragDidMove = false
             NSCursor.closedHand.set()
             needsDisplay = true
@@ -405,6 +491,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
 
             if tool == .counter {
                 vm.commitPendingText()
+                vm.recordUndoSnapshot()
                 let label = vm.nextCounterLabel
                 let newBadge = PinAnnotation(
                     tool: .counter,
@@ -415,11 +502,11 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
                 )
                 vm.annotations.append(newBadge)
                 vm.selectedTextAnnotationID = newBadge.id
-                let newIdx = vm.annotations.count - 1
-                draggingTextAnnotationIndex = newIdx
+                draggingTextAnnotationID = newBadge.id
                 textDragStartMouseView = pt
                 textDragStartNormalizedPos = normPt
-                textDragDidMove = false
+                textDragStartNormalizedPoints = [normPt]
+                textDragDidMove = true
                 window?.invalidateCursorRects(for: self)
                 needsDisplay = true
                 return
@@ -464,15 +551,36 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             return
         }
 
-        if let textIdx = draggingTextAnnotationIndex,
-           vm.annotations.indices.contains(textIdx) {
+        if let dragID = draggingTextAnnotationID {
+            guard let textIdx = vm.annotations.firstIndex(where: { $0.id == dragID }) else {
+                draggingTextAnnotationID = nil
+                textDragStartNormalizedPoints = []
+                textDragDidMove = false
+                return
+            }
+            if !textDragDidMove {
+                vm.recordUndoSnapshot()
+            }
             let pt = convert(event.locationInWindow, from: nil)
             let imgRect = imageRectInView
             let dxNorm = (pt.x - textDragStartMouseView.x) / max(1, imgRect.width)
             let dyNorm = (textDragStartMouseView.y - pt.y) / max(1, imgRect.height)
-            let newX = max(0.0, min(0.98, textDragStartNormalizedPos.x + dxNorm))
-            let newY = max(0.02, min(0.98, textDragStartNormalizedPos.y + dyNorm))
-            vm.annotations[textIdx].points = [CGPoint(x: newX, y: newY)]
+            let startPts = textDragStartNormalizedPoints.isEmpty ? [textDragStartNormalizedPos] : textDragStartNormalizedPoints
+            if startPts.count == 1 {
+                let newX = max(0.0, min(0.98, startPts[0].x + dxNorm))
+                let newY = max(0.02, min(0.98, startPts[0].y + dyNorm))
+                vm.annotations[textIdx].points = [CGPoint(x: newX, y: newY)]
+            } else {
+                let minX = startPts.map(\.x).min() ?? 0
+                let maxX = startPts.map(\.x).max() ?? 1
+                let minY = startPts.map(\.y).min() ?? 0
+                let maxY = startPts.map(\.y).max() ?? 1
+                let clampedDX = max(-minX, min(1.0 - maxX, dxNorm))
+                let clampedDY = max(-minY, min(1.0 - maxY, dyNorm))
+                vm.annotations[textIdx].points = startPts.map {
+                    CGPoint(x: $0.x + clampedDX, y: $0.y + clampedDY)
+                }
+            }
             textDragDidMove = true
             NSCursor.closedHand.set()
             needsDisplay = true
@@ -536,8 +644,9 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             return
         }
 
-        if draggingTextAnnotationIndex != nil {
-            draggingTextAnnotationIndex = nil
+        if draggingTextAnnotationID != nil {
+            draggingTextAnnotationID = nil
+            textDragStartNormalizedPoints = []
             textDragDidMove = false
             window?.invalidateCursorRects(for: self)
             updateCursorForViewPoint(pt)
@@ -546,16 +655,18 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
 
         if let tool = vm.activeTool, tool != .text, tool != .counter, !vm.currentDragPoints.isEmpty {
             if vm.currentDragPoints.count >= 2 {
-                vm.annotations.append(
-                    PinAnnotation(
-                        tool: tool,
-                        color: NSColor(vm.selectedColor),
-                        lineWidth: vm.currentToolLineWidth,
-                        points: vm.currentDragPoints
-                    )
+                vm.recordUndoSnapshot()
+                let created = PinAnnotation(
+                    tool: tool,
+                    color: NSColor(vm.selectedColor),
+                    lineWidth: vm.currentToolLineWidth,
+                    points: vm.currentDragPoints
                 )
+                vm.annotations.append(created)
+                vm.selectedTextAnnotationID = created.id
             }
             vm.currentDragPoints = []
+            window?.invalidateCursorRects(for: self)
             needsDisplay = true
             return
         }
@@ -643,6 +754,28 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
+    override func rightMouseDown(with event: NSEvent) {
+        let pt = convert(event.locationInWindow, from: nil)
+        guard imageRectInView.contains(pt) else { return }
+        if let hitIdx = hitTestTextAnnotationIndex(viewPoint: pt, includeAllShapes: true) {
+            let targetID = vm.annotations[hitIdx].id
+            vm.commitPendingText()
+            if let resolvedIdx = vm.annotations.firstIndex(where: { $0.id == targetID }) {
+                vm.recordUndoSnapshot()
+                let removed = vm.annotations.remove(at: resolvedIdx)
+                if vm.selectedTextAnnotationID == removed.id {
+                    vm.selectedTextAnnotationID = nil
+                }
+                if removed.tool == .counter {
+                    vm.resequenceCounterAnnotations()
+                }
+                window?.invalidateCursorRects(for: self)
+                needsDisplay = true
+                vm.updateToolbarPanelPosition()
+            }
+        }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         let imgRect = imageRectInView
@@ -706,7 +839,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             ctx.strokePath()
             ctx.restoreGState()
         } else if let selID = vm.selectedTextAnnotationID,
-                  let selItem = vm.annotations.first(where: { $0.id == selID && ($0.tool == .text || $0.tool == .counter) }),
+                  let selItem = vm.annotations.first(where: { $0.id == selID }),
                   let hitRect = textAnnotationHitRectInView(selItem) {
             ctx.saveGState()
             ctx.setStrokeColor(accent.withAlphaComponent(0.85).cgColor)

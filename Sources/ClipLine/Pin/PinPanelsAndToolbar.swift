@@ -30,7 +30,9 @@ struct PinToolbarView: View {
                 .help(tool.localizedName)
             }
 
-            if vm.activeTool != nil {
+            let selectedTool: PinAnnotation.Tool? = vm.annotations.first(where: { $0.id == vm.selectedTextAnnotationID })?.tool
+            let activeOrSelectedTool: PinAnnotation.Tool? = selectedTool ?? vm.activeTool
+            if let styleTool = activeOrSelectedTool {
                 Divider().frame(height: 16)
                 HStack(spacing: 4) {
                     ForEach(StrokePreset.allCases) { preset in
@@ -58,7 +60,7 @@ struct PinToolbarView: View {
                     }
                 }
 
-                if vm.activeTool != .mosaic {
+                if styleTool != .mosaic {
                     Divider().frame(height: 16)
                     HStack(spacing: 5) {
                         ForEach(palette, id: \.self) { c in
@@ -81,7 +83,7 @@ struct PinToolbarView: View {
                     .padding(.horizontal, 2)
                 }
 
-                if vm.activeTool == .text {
+                if styleTool == .text {
                     Divider().frame(height: 16)
                     HStack(spacing: 4) {
                         ForEach(TextBackgroundStyle.allCases) { bgStyle in
@@ -133,7 +135,7 @@ struct PinToolbarView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(vm.annotations.isEmpty)
+            .disabled(!vm.canUndo)
             .help(L10n.toolbarUndoTooltip)
 
             Button(action: { vm.runOCR(andTranslate: false) }) {
@@ -358,6 +360,11 @@ final class PinFloatingPanel: NSPanel {
         if event.keyCode == 48 || chars == "p" {
             vm.clipToClothesline()
             return
+        }
+        if event.keyCode == 51 || event.keyCode == 117 {
+            if vm.deleteSelectedAnnotation() {
+                return
+            }
         }
         if event.keyCode == 49 {
             guard !event.isARepeat else { return }

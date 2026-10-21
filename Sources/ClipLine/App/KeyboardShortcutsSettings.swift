@@ -6,25 +6,46 @@ import SwiftUI
 @MainActor
 final class ShortcutSettingsModel: ObservableObject {
     @Published private(set) var configuration: ShortcutConfiguration
+    @Published private(set) var crosshairConfiguration: CrosshairConfiguration
     @Published private(set) var recordingAction: ShortcutAction?
     @Published private(set) var errorMessage: String?
 
     private let store: ShortcutConfigurationStore
+    private let crosshairStore: CrosshairConfigurationStore
     private let runtime: ShortcutRuntime
 
     init(
         store: ShortcutConfigurationStore,
         runtime: ShortcutRuntime,
+        crosshairStore: CrosshairConfigurationStore? = nil,
         launchRegistrationFailures: [ShortcutRegistrationFailure] = []
     ) {
         self.store = store
+        let resolvedCrosshairStore = crosshairStore ?? CrosshairConfigurationStore()
+        self.crosshairStore = resolvedCrosshairStore
         self.runtime = runtime
         self.configuration = runtime.configuration
+        self.crosshairConfiguration = resolvedCrosshairStore.load()
         self.errorMessage = launchRegistrationFailures.isEmpty
             ? nil
             : L10n.shortcutRuntimeMessage(
                 ShortcutRuntimeError.launchRegistrationFailed(launchRegistrationFailures)
             )
+    }
+
+    func setCrosshairStyle(_ style: CrosshairStyle) {
+        crosshairConfiguration.style = style
+        crosshairStore.save(crosshairConfiguration)
+    }
+
+    func setCrosshairColor(_ color: CrosshairColorPreset) {
+        crosshairConfiguration.color = color
+        crosshairStore.save(crosshairConfiguration)
+    }
+
+    func setShowLoupe(_ show: Bool) {
+        crosshairConfiguration.showLoupe = show
+        crosshairStore.save(crosshairConfiguration)
     }
 
     @discardableResult
@@ -82,6 +103,8 @@ final class ShortcutSettingsModel: ObservableObject {
 
     func restoreDefaults() {
         if let recordingAction { cancelRecording(recordingAction) }
+        crosshairConfiguration = .defaults
+        crosshairStore.save(.defaults)
         do {
             let data = try store.encodedData(for: .defaults)
             try runtime.apply(.defaults)
@@ -122,6 +145,84 @@ struct ShortcutSettingsView: View {
                 shortcutRow(.clipboard)
             }
 
+            Divider()
+                .padding(.vertical, 2)
+
+            Text(L10n.crosshairSectionHeading)
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    Text(L10n.crosshairStyleLabel)
+                        .frame(width: 112, alignment: .leading)
+                    HStack(spacing: 6) {
+                        ForEach(CrosshairStyle.allCases) { style in
+                            let selected = model.crosshairConfiguration.style == style
+                            Button {
+                                model.setCrosshairStyle(style)
+                            } label: {
+                                Text(L10n.crosshairStyleName(style))
+                                    .font(.system(size: 12, weight: .medium))
+                                    .padding(.horizontal, 10)
+                                    .frame(height: 26)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(selected ? Color.accentColor : Color.primary.opacity(0.08))
+                                    )
+                                    .foregroundStyle(selected ? Color.white : Color.primary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    Text(L10n.crosshairColorLabel)
+                        .frame(width: 112, alignment: .leading)
+                    HStack(spacing: 8) {
+                        ForEach(CrosshairColorPreset.allCases) { preset in
+                            let selected = model.crosshairConfiguration.color == preset
+                            Button {
+                                model.setCrosshairColor(preset)
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Circle()
+                                        .fill(swatchColor(for: preset))
+                                        .frame(width: 12, height: 12)
+                                        .overlay(
+                                            Circle()
+                                                .strokeBorder(Color.primary.opacity(0.35), lineWidth: 0.8)
+                                        )
+                                    Text(L10n.crosshairColorName(preset))
+                                        .font(.system(size: 11.5, weight: .medium))
+                                }
+                                .padding(.horizontal, 8)
+                                .frame(height: 25)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(selected ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.06))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .strokeBorder(selected ? Color.accentColor : Color.clear, lineWidth: 1.4)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                Toggle(
+                    L10n.crosshairShowLoupeLabel,
+                    isOn: Binding(
+                        get: { model.crosshairConfiguration.showLoupe },
+                        set: { model.setShowLoupe($0) }
+                    )
+                )
+                .toggleStyle(.checkbox)
+                .font(.callout)
+            }
+
             if let errorMessage = model.errorMessage {
                 Text(errorMessage)
                     .font(.callout)
@@ -140,6 +241,10 @@ struct ShortcutSettingsView: View {
         .padding(22)
         .frame(width: 460, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func swatchColor(for preset: CrosshairColorPreset) -> Color {
+        Color(nsColor: preset.nsColor)
     }
 
     private func shortcutRow(_ action: ShortcutAction) -> some View {

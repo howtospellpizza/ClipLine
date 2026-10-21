@@ -23,7 +23,8 @@ test:
 
 install: build
 	@mkdir -p "$(INSTALL_DIR)"
-	cp build/$(BINARY_NAME) "$(INSTALL_DIR)/$(BINARY_NAME)"
+	install -m 755 build/$(BINARY_NAME) "$(INSTALL_DIR)/$(BINARY_NAME)"
+	codesign --force --sign - "$(INSTALL_DIR)/$(BINARY_NAME)" >/dev/null 2>&1 || true
 	@echo "✅ Installed to $(INSTALL_DIR)/$(BINARY_NAME)"
 
 test-install: build
