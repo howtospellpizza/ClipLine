@@ -19,6 +19,59 @@ enum ShortcutAction: String, CaseIterable, Codable, Hashable {
     }
 }
 
+enum CrosshairStyle: String, CaseIterable, Codable, Identifiable, Equatable {
+    case full
+    case reticle
+    case dotRing
+
+    var id: String { rawValue }
+}
+
+enum CrosshairColorPreset: String, CaseIterable, Codable, Identifiable, Equatable {
+    case cyan
+    case green
+    case red
+    case yellow
+    case white
+
+    var id: String { rawValue }
+}
+
+struct CrosshairConfiguration: Codable, Equatable {
+    var style: CrosshairStyle
+    var color: CrosshairColorPreset
+    var showLoupe: Bool
+
+    static let defaults = CrosshairConfiguration(
+        style: .full,
+        color: .cyan,
+        showLoupe: true
+    )
+}
+
+struct CrosshairConfigurationStore {
+    static let key = "CaptureCrosshair.v1"
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = UserDefaults(suiteName: ShortcutConfigurationStore.suiteName) ?? .standard) {
+        self.defaults = defaults
+    }
+
+    func load() -> CrosshairConfiguration {
+        guard let data = defaults.data(forKey: Self.key),
+              let configuration = try? JSONDecoder().decode(CrosshairConfiguration.self, from: data) else {
+            return .defaults
+        }
+        return configuration
+    }
+
+    func save(_ configuration: CrosshairConfiguration) {
+        guard let data = try? JSONEncoder().encode(configuration) else { return }
+        defaults.set(data, forKey: Self.key)
+    }
+}
+
 struct ShortcutBinding: Codable, Equatable, Hashable {
     let keyCode: UInt16
     let carbonModifiers: UInt32

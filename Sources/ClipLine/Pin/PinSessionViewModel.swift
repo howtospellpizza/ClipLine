@@ -40,9 +40,15 @@ final class PinSessionViewModel: ObservableObject {
     @Published var hasMovedWindow: Bool = false
 
     @Published var annotations: [PinAnnotation] = []
+    private(set) var undoHistory: [[PinAnnotation]] = []
+    private var hasUsedUndoHistory = false
     @Published var currentDragPoints: [CGPoint] = []
+    var isSyncingToolbarFromSelection: Bool = false
     @Published var activeTool: PinAnnotation.Tool? = nil {
         didSet {
+            if activeTool != nil {
+                selectedTextAnnotationID = nil
+            }
             if activeTool == .mosaic && pixelatedBaseImage == nil {
                 regeneratePixelatedImage()
             }
@@ -52,21 +58,31 @@ final class PinSessionViewModel: ObservableObject {
     }
     @Published var selectedColor: Color = .red {
         didSet {
+            guard !isSyncingToolbarFromSelection else { return }
             hostingPanel?.canvasView?.applyStyleChangeToSelectionOrField(updateColor: true, updatePreset: false, updateBackground: false)
         }
     }
     @Published var strokePreset: StrokePreset = .medium {
         didSet {
+            guard !isSyncingToolbarFromSelection else { return }
             hostingPanel?.canvasView?.applyStyleChangeToSelectionOrField(updateColor: false, updatePreset: true, updateBackground: false)
         }
     }
     @Published var textBackgroundStyle: TextBackgroundStyle = .transparent {
         didSet {
+            guard !isSyncingToolbarFromSelection else { return }
             hostingPanel?.canvasView?.applyStyleChangeToSelectionOrField(updateColor: false, updatePreset: false, updateBackground: true)
             updateToolbarPanelPosition()
         }
     }
-    @Published var selectedTextAnnotationID: UUID? = nil
+    @Published var selectedTextAnnotationID: UUID? = nil {
+        didSet {
+            if oldValue != selectedTextAnnotationID {
+                syncToolbarWithSelectedAnnotation()
+                updateToolbarPanelPosition()
+            }
+        }
+    }
     @Published var scale: CGFloat = 1.0
     @Published var windowOpacity: Double = 1.0
     @Published var showToolbar: Bool = true {
@@ -111,6 +127,17 @@ final class PinSessionViewModel: ObservableObject {
     var nextCounterLabel: String {
         let count = annotations.filter { $0.tool == .counter }.count
         return "\(count + 1)"
+    }
+
+    func resequenceCounterAnnotations() {
+        var step = 1
+        for idx in annotations.indices where annotations[idx].tool == .counter {
+            let expected = "\(step)"
+            if annotations[idx].text != expected {
+                annotations[idx].text = expected
+            }
+            step += 1
+        }
     }
 
     static func constrainedNormalizedEndPoint(
@@ -367,11 +394,127 @@ final class PinSessionViewModel: ObservableObject {
         }
     }
 
-    func undo() {
-        if !annotations.isEmpty {
-            _ = annotations.popLast()
-            hostingPanel?.canvasView?.needsDisplay = true
+    var canUndo: Bool {
+        !undoHistory.isEmpty || (!hasUsedUndoHistory && !annotations.isEmpty)
+    }
+
+    func recordUndoSnapshot() {
+        hasUsedUndoHistory = true
+        undoHistory.append(annotations)
+        if undoHistory.count > 100 {
+            undoHistory.removeFirst()
         }
+    }
+
+    func syncToolbarWithSelectedAnnotation() {
+        guard let selID = selectedTextAnnotationID,
+              let item = annotations.first(where: { $0.id == selID }) else { return }
+        isSyncingToolbarFromSelection = true
+        defer { isSyncingToolbarFromSelection = false }
+
+        if item.tool != .mosaic {
+            selectedColor = Self.matchingToolbarPaletteColor(for: item.color)
+        }
+        strokePreset = Self.matchingStrokePreset(for: item)
+        if item.tool == .text {
+            textBackgroundStyle = item.textBackgroundStyle
+        }
+    }
+
+    static func matchingToolbarPaletteColor(for nsColor: NSColor) -> Color {
+        let palette: [(Color, NSColor)] = [
+            (.red, NSColor(Color.red)),
+            (.orange, NSColor(Color.orange)),
+            (.yellow, NSColor(Color.yellow)),
+            (.green, NSColor(Color.green)),
+            (.blue, NSColor(Color.blue)),
+            (.white, NSColor(Color.white))
+        ]
+        guard let target = nsColor.usingColorSpace(.sRGB) else { return Color(nsColor: nsColor) }
+        var best: Color = Color(nsColor: nsColor)
+        var bestDist: CGFloat = .greatestFiniteMagnitude
+        for (swiftColor, candidateNS) in palette {
+            guard let c = candidateNS.usingColorSpace(.sRGB) else { continue }
+            let dr = target.redComponent - c.redComponent
+            let dg = target.greenComponent - c.greenComponent
+            let db = target.blueComponent - c.blueComponent
+            let dist = dr * dr + dg * dg + db * db
+            if dist < bestDist {
+                bestDist = dist
+                best = swiftColor
+            }
+        }
+        return bestDist <= 0.08 ? best : Color(nsColor: nsColor)
+    }
+
+    static func matchingStrokePreset(for item: PinAnnotation) -> StrokePreset {
+        StrokePreset.allCases.min(by: { presetA, presetB in
+            let widthA = Self.presetLineWidth(presetA, for: item.tool)
+            let widthB = Self.presetLineWidth(presetB, for: item.tool)
+            return abs(widthA - item.lineWidth) < abs(widthB - item.lineWidth)
+        }) ?? .medium
+    }
+
+    static func presetLineWidth(_ preset: StrokePreset, for tool: PinAnnotation.Tool) -> CGFloat {
+        switch tool {
+        case .counter: return preset.counterBadgeDiameter
+        case .text: return preset.textFontSize
+        case .highlighter: return preset.highlighterBrushWidth
+        case .mosaic: return preset.mosaicBrushWidth
+        case .rect, .arrow, .pen: return preset.strokeLineWidth
+        }
+    }
+
+    func undo() {
+        if let previous = undoHistory.popLast() {
+            annotations = previous
+            if let selID = selectedTextAnnotationID,
+               !annotations.contains(where: { $0.id == selID }) {
+                selectedTextAnnotationID = nil
+            } else {
+                syncToolbarWithSelectedAnnotation()
+            }
+            if let cv = hostingPanel?.canvasView {
+                cv.window?.invalidateCursorRects(for: cv)
+                cv.needsDisplay = true
+            }
+            updateToolbarPanelPosition()
+            return
+        }
+        if !hasUsedUndoHistory && !annotations.isEmpty {
+            let removed = annotations.popLast()
+            if removed?.id == selectedTextAnnotationID {
+                selectedTextAnnotationID = nil
+            }
+            if removed?.tool == .counter {
+                resequenceCounterAnnotations()
+            }
+            if let cv = hostingPanel?.canvasView {
+                cv.window?.invalidateCursorRects(for: cv)
+                cv.needsDisplay = true
+            }
+            updateToolbarPanelPosition()
+        }
+    }
+
+    @discardableResult
+    func deleteSelectedAnnotation() -> Bool {
+        guard let selID = selectedTextAnnotationID,
+              let idx = annotations.firstIndex(where: { $0.id == selID }) else {
+            return false
+        }
+        recordUndoSnapshot()
+        let removed = annotations.remove(at: idx)
+        selectedTextAnnotationID = nil
+        if removed.tool == .counter {
+            resequenceCounterAnnotations()
+        }
+        if let cv = hostingPanel?.canvasView {
+            cv.window?.invalidateCursorRects(for: cv)
+            cv.needsDisplay = true
+        }
+        updateToolbarPanelPosition()
+        return true
     }
 
     func cancelPendingTextEditing() {
@@ -415,6 +558,7 @@ final class PinSessionViewModel: ObservableObject {
         let trimmed = pendingTextString.trimmingCharacters(in: .whitespacesAndNewlines)
         if let editID = editingExistingTextAnnotationID,
            let idx = annotations.firstIndex(where: { $0.id == editID && $0.tool == .text }) {
+            recordUndoSnapshot()
             if trimmed.isEmpty {
                 annotations.remove(at: idx)
                 selectedTextAnnotationID = nil
@@ -427,6 +571,7 @@ final class PinSessionViewModel: ObservableObject {
                 selectedTextAnnotationID = editID
             }
         } else if !trimmed.isEmpty {
+            recordUndoSnapshot()
             let newItem = PinAnnotation(
                 tool: .text,
                 color: NSColor(selectedColor),

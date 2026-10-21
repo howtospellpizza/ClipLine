@@ -23,7 +23,7 @@ test:
 
 install: build
 	@mkdir -p "$(INSTALL_DIR)"
-	cp build/$(BINARY_NAME) "$(INSTALL_DIR)/$(BINARY_NAME)"
+	install -m 755 build/$(BINARY_NAME) "$(INSTALL_DIR)/$(BINARY_NAME)"
 	@echo "✅ Installed to $(INSTALL_DIR)/$(BINARY_NAME)"
 
 test-install: build

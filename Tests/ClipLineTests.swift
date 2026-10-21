@@ -340,6 +340,94 @@ func runAllTests() -> Int32 {
         )
     }
 
+    // Verify Loupe HEX pixel sampling with deterministic quadrant colors & pressing 'C' copies #HEX color to pasteboard and exits capture
+    snapSelectionView.pasteboardProvider = { testPasteboard }
+    testPasteboard.clearContents()
+    if let quadSpace = CGColorSpace(name: CGColorSpace.sRGB),
+       let quadCtx = CGContext(
+        data: nil,
+        width: 200,
+        height: 100,
+        bitsPerComponent: 8,
+        bytesPerRow: 0,
+        space: quadSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+       ) {
+        // CoreGraphics context origin is bottom-left:
+        // Bottom half (CG y: 0..<50 => CGImage pixel y: 50..<100 => view y: 0..<25 at scale 2.0): pure BLUE (#0000FF)
+        quadCtx.setFillColor(red: 0.0, green: 0.0, blue: 1.0, alpha: 1.0)
+        quadCtx.fill(CGRect(x: 0, y: 0, width: 200, height: 50))
+        // Top-left (CG x: 0..<100, y: 50..<100 => CGImage pixel x: 0..<100, y: 0..<50 => view x: 0..<50, y: 25..<50): pure RED (#FF0000)
+        quadCtx.setFillColor(red: 1.0, green: 0.0, blue: 0.0, alpha: 1.0)
+        quadCtx.fill(CGRect(x: 0, y: 50, width: 100, height: 50))
+        // Top-right (CG x: 100..<200, y: 50..<100 => view x: 50..<100, y: 25..<50): pure GREEN (#00FF00)
+        quadCtx.setFillColor(red: 0.0, green: 1.0, blue: 0.0, alpha: 1.0)
+        quadCtx.fill(CGRect(x: 100, y: 50, width: 100, height: 50))
+
+        if let quadCG = quadCtx.makeImage() {
+            let quadViewSize = NSSize(width: 100, height: 50)
+            let sampledTopLeft = PixPinSelectionView.samplePixelHexColor(
+                cgImage: quadCG,
+                viewHeight: quadViewSize.height,
+                scaleFactor: 2.0,
+                viewPoint: NSPoint(x: 20, y: 40)
+            )
+            let sampledTopRight = PixPinSelectionView.samplePixelHexColor(
+                cgImage: quadCG,
+                viewHeight: quadViewSize.height,
+                scaleFactor: 2.0,
+                viewPoint: NSPoint(x: 75, y: 40)
+            )
+            let sampledBottom = PixPinSelectionView.samplePixelHexColor(
+                cgImage: quadCG,
+                viewHeight: quadViewSize.height,
+                scaleFactor: 2.0,
+                viewPoint: NSPoint(x: 20, y: 10)
+            )
+            t.check(
+                sampledTopLeft?.hex == "#FF0000" &&
+                sampledTopRight?.hex == "#00FF00" &&
+                sampledBottom?.hex == "#0000FF",
+                "samplePixelHexColor maps Retina scale and inverted Y view coordinates to exact deterministic #RRGGBB colors",
+                detail: "topLeft=\(String(describing: sampledTopLeft?.hex)), topRight=\(String(describing: sampledTopRight?.hex)), bottom=\(String(describing: sampledBottom?.hex))"
+            )
+            var finishedOnColorCopy = false
+            let colorPickView = PixPinSelectionView(
+                frame: NSRect(origin: .zero, size: quadViewSize),
+                screenOrigin: .zero,
+                frozenImage: NSImage(cgImage: quadCG, size: quadViewSize),
+                cgImage: quadCG,
+                scaleFactor: 2.0,
+                crosshairConfig: CrosshairConfiguration(style: .dotRing, color: .green, showLoupe: true),
+                onFinish: { res in finishedOnColorCopy = (res == nil) }
+            )
+            colorPickView.pasteboardProvider = { testPasteboard }
+            if let moveEv = NSEvent.mouseEvent(
+                with: .mouseMoved, location: NSPoint(x: 75, y: 40), modifierFlags: [],
+                timestamp: 0, windowNumber: 0, context: nil, eventNumber: 6, clickCount: 0, pressure: 0
+            ),
+               let cKey = NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                context: nil, characters: "c", charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 8
+               ) {
+                colorPickView.mouseMoved(with: moveEv)
+                colorPickView.keyDown(with: cKey)
+                let copiedHex = testPasteboard.string(forType: .string)
+                t.check(
+                    finishedOnColorCopy && copiedHex == "#00FF00",
+                    "Pressing 'C' in capture overlay copies exact hovered pixel #00FF00 to pasteboard and exits capture cleanly",
+                    detail: "copied=\(String(describing: copiedHex))"
+                )
+            } else {
+                t.check(false, "Constructed mouseMoved and 'C' keyEvent for HEX color picker test")
+            }
+        } else {
+            t.check(false, "Created quadrant CGImage for HEX color picker test")
+        }
+    } else {
+        t.check(false, "Created sRGB CGContext for HEX color picker test")
+    }
+
     // Shift-constrained square & 45-degree arrow math + Step Counter + Highlighter
     let constrainedSquareEnd = PinSessionViewModel.constrainedNormalizedEndPoint(
         for: .rect,
@@ -441,6 +529,124 @@ func runAllTests() -> Int32 {
         featureVM.nextCounterLabel == "1",
         "Undoing counter badge decrements nextCounterLabel back to 1"
     )
+    let badge1 = PinAnnotation(tool: .counter, color: .systemRed, lineWidth: 28, points: [CGPoint(x: 0.2, y: 0.3)], text: featureVM.nextCounterLabel)
+    featureVM.annotations.append(badge1)
+    let badge2 = PinAnnotation(tool: .counter, color: .systemRed, lineWidth: 28, points: [CGPoint(x: 0.5, y: 0.3)], text: featureVM.nextCounterLabel)
+    featureVM.annotations.append(badge2)
+    let badge3 = PinAnnotation(tool: .counter, color: .systemRed, lineWidth: 28, points: [CGPoint(x: 0.8, y: 0.3)], text: featureVM.nextCounterLabel)
+    featureVM.annotations.append(badge3)
+    featureVM.selectedTextAnnotationID = badge1.id
+    let deletedFirstBadge = featureVM.deleteSelectedAnnotation()
+    t.check(
+        deletedFirstBadge &&
+        featureVM.annotations.map(\.text) == ["1", "2"] &&
+        featureVM.nextCounterLabel == "3",
+        "Deleting counter badge #1 resequences remaining badges to [1, 2] so the next counter is 3 without duplicate 2s"
+    )
+    featureVM.undo()
+    t.check(
+        featureVM.annotations.map(\.id) == [badge1.id, badge2.id, badge3.id] &&
+        featureVM.annotations.map(\.text) == ["1", "2", "3"] &&
+        featureVM.nextCounterLabel == "4",
+        "Undoing a counter deletion restores the deleted badge in place with original [1, 2, 3] sequence"
+    )
+    featureVM.annotations.removeAll()
+
+    // Verify ScreenCaptureOverlayController multi-display lifecycle, focus handoff, cursor-screen failure guard, and cross-display drag cancel
+    let multiController = ScreenCaptureOverlayController()
+    var missingInitialAlertCount = 0
+    multiController.presentPermissionAlert = { missingInitialAlertCount += 1 }
+    var missingInitialResult: CaptureSelectionResult? = nil
+    var missingInitialCompleted = false
+    multiController.installCaptureOverlays(
+        descriptors: [
+            (screenFrame: NSRect(x: 400, y: 0, width: 400, height: 300), cgImage: cgScreen, candidateWindowRects: [], isInitialCursorScreen: false)
+        ],
+        hideSystemCursor: false,
+        completion: { res in
+            missingInitialResult = res
+            missingInitialCompleted = true
+        }
+    )
+    t.check(
+        missingInitialCompleted && missingInitialResult == nil &&
+        multiController.overlayWindows.isEmpty && missingInitialAlertCount == 1,
+        "If capture fails on the cursor's display, controller aborts cleanly instead of silently activating another display"
+    )
+
+    var multiCaptureResult: CaptureSelectionResult? = nil
+    var multiCaptureFinishedCount = 0
+    multiController.installCaptureOverlays(
+        descriptors: [
+            (screenFrame: NSRect(x: 0, y: 0, width: 400, height: 300), cgImage: cgScreen, candidateWindowRects: [], isInitialCursorScreen: true),
+            (screenFrame: NSRect(x: 400, y: 0, width: 400, height: 300), cgImage: cgScreen, candidateWindowRects: [], isInitialCursorScreen: false)
+        ],
+        hideSystemCursor: false,
+        completion: { res in
+            multiCaptureResult = res
+            multiCaptureFinishedCount += 1
+        }
+    )
+    if multiController.overlayWindows.count == 2,
+       let panelA = multiController.overlayWindows.first,
+       let panelB = multiController.overlayWindows.last,
+       let viewA = panelA.contentView as? PixPinSelectionView,
+       let viewB = panelB.contentView as? PixPinSelectionView {
+        t.check(
+            viewA.isCursorInsideScreen && !viewB.isCursorInsideScreen && panelA.firstResponder === viewA,
+            "Initial cursor display starts active and owns first responder"
+        )
+        // Start a drag on Screen A and release 1pt outside Screen A's bounds (onto Screen B) -> cancels drag without finishing clipped capture
+        if let downA = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: NSPoint(x: 350, y: 150), modifierFlags: [],
+            timestamp: 0, windowNumber: panelA.windowNumber, context: nil, eventNumber: 31, clickCount: 1, pressure: 1.0
+        ),
+           let dragOutA = NSEvent.mouseEvent(
+            with: .leftMouseDragged, location: NSPoint(x: 401, y: 150), modifierFlags: [],
+            timestamp: 0, windowNumber: panelA.windowNumber, context: nil, eventNumber: 32, clickCount: 1, pressure: 1.0
+           ),
+           let upOutA = NSEvent.mouseEvent(
+            with: .leftMouseUp, location: NSPoint(x: 401, y: 150), modifierFlags: [],
+            timestamp: 0, windowNumber: panelA.windowNumber, context: nil, eventNumber: 33, clickCount: 1, pressure: 1.0
+           ) {
+            viewA.mouseDown(with: downA)
+            viewA.mouseDragged(with: dragOutA)
+            viewA.mouseUp(with: upOutA)
+            t.check(
+                multiCaptureFinishedCount == 0 && multiController.overlayWindows.count == 2,
+                "Releasing a drag even 1pt outside its originating display cancels the cross-screen drag instead of capturing a clipped strip"
+            )
+        } else {
+            t.check(false, "Constructed cross-display drag events for Screen A")
+        }
+        // Move cursor onto Screen B -> real controller handoff updates cursor flags and first responder, then Space captures Screen B
+        if let moveOntoB = NSEvent.mouseEvent(
+            with: .mouseMoved, location: NSPoint(x: 80, y: 120), modifierFlags: [],
+            timestamp: 0, windowNumber: panelB.windowNumber, context: nil, eventNumber: 34, clickCount: 0, pressure: 0
+        ),
+           let spaceB = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: panelB.windowNumber,
+            context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49
+           ) {
+            viewB.mouseMoved(with: moveOntoB)
+            t.check(
+                viewB.isCursorInsideScreen && !viewA.isCursorInsideScreen && panelB.firstResponder === viewB,
+                "Moving cursor onto secondary screen transfers controller active state and first responder to secondary overlay"
+            )
+            viewB.keyDown(with: spaceB)
+            t.check(
+                multiCaptureFinishedCount == 1 &&
+                multiCaptureResult?.selectedScreenRect == NSRect(x: 400, y: 0, width: 400, height: 300) &&
+                multiController.overlayWindows.isEmpty,
+                "Pressing Space after moving to secondary screen captures secondary screen and closes all overlay windows"
+            )
+        } else {
+            t.check(false, "Constructed mouseMoved and Space keyEvent for Screen B")
+        }
+    } else {
+        t.check(false, "ScreenCaptureOverlayController created two overlay panels for multi-display test")
+        multiController.finish(with: nil)
+    }
 
     var openedSettingsFromHUD = false
     var revealedBinaryFromHUD = false
@@ -1189,6 +1395,245 @@ func runAllTests() -> Int32 {
                 "Clicking a second text annotation while committing an empty re-edit on the first deletes the first and safely selects the second without index out-of-range"
             )
         }
+
+        // Verify Feature 3: Selecting, dragging, restyling, right-click erasing, and Delete-key removing non-text shapes (.rect / .arrow) even while a drawing tool is active
+        vm.activeTool = .arrow
+        let rectAnnotation = PinAnnotation(
+            tool: .rect,
+            color: NSColor(.red),
+            lineWidth: StrokePreset.thin.strokeLineWidth,
+            points: [CGPoint(x: 0.20, y: 0.20), CGPoint(x: 0.50, y: 0.50)]
+        )
+        let arrowAnnotation = PinAnnotation(
+            tool: .arrow,
+            color: NSColor(.blue),
+            lineWidth: StrokePreset.medium.strokeLineWidth,
+            points: [CGPoint(x: 0.60, y: 0.30), CGPoint(x: 0.85, y: 0.60)]
+        )
+        vm.annotations.append(rectAnnotation)
+        vm.annotations.append(arrowAnnotation)
+        let imgR = canvas.imageRectInView
+        let rectTopBorderPt = NSPoint(
+            x: imgR.minX + 0.35 * imgR.width,
+            y: imgR.maxY - 0.20 * imgR.height
+        )
+        let rectInteriorPt = NSPoint(
+            x: imgR.minX + 0.35 * imgR.width,
+            y: imgR.maxY - 0.35 * imgR.height
+        )
+        t.check(
+            canvas.hitTestTextAnnotationIndex(viewPoint: rectTopBorderPt) != nil &&
+            canvas.hitTestTextAnnotationIndex(viewPoint: rectInteriorPt) == nil,
+            "Hollow .rect annotation hits on its border stroke even when another drawing tool (.arrow) is active, and ignores clicks inside its hollow interior"
+        )
+        if let downRect = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: rectTopBorderPt, modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 20, clickCount: 1, pressure: 1.0
+        ),
+           let dragRect = NSEvent.mouseEvent(
+            with: .leftMouseDragged, location: NSPoint(x: rectTopBorderPt.x + 24, y: rectTopBorderPt.y - 18), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 21, clickCount: 1, pressure: 1.0
+           ),
+           let upRect = NSEvent.mouseEvent(
+            with: .leftMouseUp, location: NSPoint(x: rectTopBorderPt.x + 24, y: rectTopBorderPt.y - 18), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 22, clickCount: 1, pressure: 1.0
+           ) {
+            canvas.mouseDown(with: downRect)
+            canvas.mouseDragged(with: dragRect)
+            canvas.mouseUp(with: upRect)
+            let movedRect = vm.annotations.first(where: { $0.id == rectAnnotation.id })
+            let dx0 = (movedRect?.points[0].x ?? 0) - 0.20
+            let dx1 = (movedRect?.points[1].x ?? 0) - 0.50
+            let dy0 = (movedRect?.points[0].y ?? 0) - 0.20
+            let dy1 = (movedRect?.points[1].y ?? 0) - 0.50
+            t.check(
+                vm.selectedTextAnnotationID == rectAnnotation.id &&
+                dx0 > 0.05 && abs(dx0 - dx1) < 0.001 &&
+                dy0 > 0.05 && abs(dy0 - dy1) < 0.001,
+                "Selecting and dragging apreviously drawn .rect annotation while .arrow is still active translates both corners uniformly without starting a new arrow",
+                detail: "movedPts=\(String(describing: movedRect?.points))"
+            )
+            // Restyle selected .rect color & stroke preset
+            vm.selectedColor = .green
+            vm.strokePreset = .thick
+            let restyledRect = vm.annotations.first(where: { $0.id == rectAnnotation.id })
+            t.check(
+                restyledRect?.color == NSColor(.green) && restyledRect?.lineWidth == StrokePreset.thick.strokeLineWidth,
+                "Changing selectedColor and strokePreset updates a selected non-text shape (.rect)"
+            )
+            // Switching activeTool clears selection so preparing the next tool does NOT mutate the previous shape
+            vm.activeTool = .mosaic
+            vm.strokePreset = .thin
+            let preservedRect = vm.annotations.first(where: { $0.id == rectAnnotation.id })
+            t.check(
+                vm.selectedTextAnnotationID == nil &&
+                preservedRect?.lineWidth == StrokePreset.thick.strokeLineWidth,
+                "Switching activeTool clears selection so changing strokePreset for the next tool does not mutate the previously selected annotation"
+            )
+            // Reselect .rect and press Delete (keyCode 51) to remove it, then verify Undo restores it
+            vm.selectedTextAnnotationID = rectAnnotation.id
+            if let deleteEv = NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: pinPanel.windowNumber, context: nil, characters: "\u{7f}",
+                charactersIgnoringModifiers: "\u{7f}", isARepeat: false, keyCode: 51
+            ) {
+                pinPanel.keyDown(with: deleteEv)
+                t.check(
+                    !vm.annotations.contains(where: { $0.id == rectAnnotation.id }) &&
+                    vm.selectedTextAnnotationID == nil &&
+                    pinPanel.isVisible,
+                    "Pressing Delete removes the selected annotation and keeps the pin panel open"
+                )
+                vm.undo()
+                t.check(
+                    vm.annotations.contains(where: { $0.id == rectAnnotation.id }),
+                    "Invoking Undo after Delete restores the deleted annotation instead of popping another annotation"
+                )
+                // Delete it again so subsequent composite check stays clean
+                vm.selectedTextAnnotationID = rectAnnotation.id
+                _ = vm.deleteSelectedAnnotation()
+            } else {
+                t.check(false, "Constructed Delete keyEvent for .rect removal test")
+            }
+        } else {
+            t.check(false, "Constructed mouse events for .rect drag test")
+        }
+        // Also verify dragging the second annotation (.arrow) by its arrowhead while .arrow tool is active, then right-click erasing and undoing
+        let arrowTipWingPt = NSPoint(
+            x: imgR.minX + 0.85 * imgR.width - 6.0,
+            y: imgR.maxY - 0.60 * imgR.height + 8.0
+        )
+        if let downArrow = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: arrowTipWingPt, modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 25, clickCount: 1, pressure: 1.0
+        ),
+           let dragArrow = NSEvent.mouseEvent(
+            with: .leftMouseDragged, location: NSPoint(x: arrowTipWingPt.x - 16, y: arrowTipWingPt.y + 12), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 26, clickCount: 1, pressure: 1.0
+           ),
+           let upArrow = NSEvent.mouseEvent(
+            with: .leftMouseUp, location: NSPoint(x: arrowTipWingPt.x - 16, y: arrowTipWingPt.y + 12), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 27, clickCount: 1, pressure: 1.0
+           ) {
+            vm.activeTool = .arrow
+            canvas.mouseDown(with: downArrow)
+            canvas.mouseDragged(with: dragArrow)
+            canvas.mouseUp(with: upArrow)
+            let movedArrow = vm.annotations.first(where: { $0.id == arrowAnnotation.id })
+            t.check(
+                vm.selectedTextAnnotationID == arrowAnnotation.id &&
+                (movedArrow?.points[0].x ?? 1.0) < 0.58 &&
+                (movedArrow?.points[1].x ?? 1.0) < 0.83,
+                "Clicking and dragging the second annotation (.arrow) near its arrowhead while .arrow tool is active moves the existing arrow instead of drawing a third shape"
+            )
+            vm.undo()
+        } else {
+            t.check(false, "Constructed mouse events for .arrow arrowhead drag test")
+        }
+        // Right-click on the arrow annotation to erase it in one step, then verify Undo can restore it
+        let arrowMidPt = NSPoint(
+            x: imgR.minX + 0.725 * imgR.width,
+            y: imgR.maxY - 0.45 * imgR.height
+        )
+        if let rightClickArrow = NSEvent.mouseEvent(
+            with: .rightMouseDown, location: arrowMidPt, modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 23, clickCount: 1, pressure: 1.0
+        ) {
+            canvas.rightMouseDown(with: rightClickArrow)
+            t.check(
+                !vm.annotations.contains(where: { $0.id == arrowAnnotation.id }),
+                "Right-clicking any annotation immediately erases that annotation"
+            )
+            vm.undo()
+            t.check(
+                vm.annotations.contains(where: { $0.id == arrowAnnotation.id }),
+                "Undoing after right-click erase restores the erased annotation"
+            )
+            canvas.rightMouseDown(with: rightClickArrow)
+        } else {
+            t.check(false, "Constructed rightMouseDown event for .arrow erase test")
+        }
+        // Verify placing and dragging a counter badge in a single mouseDown->mouseDragged->mouseUp gesture is undone in ONE Undo step
+        vm.activeTool = .counter
+        let counterPlacePt = NSPoint(x: imgR.minX + 0.30 * imgR.width, y: imgR.maxY - 0.30 * imgR.height)
+        if let cDown = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: counterPlacePt, modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 28, clickCount: 1, pressure: 1.0
+        ),
+           let cDrag = NSEvent.mouseEvent(
+            with: .leftMouseDragged, location: NSPoint(x: counterPlacePt.x + 20, y: counterPlacePt.y - 15), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 29, clickCount: 1, pressure: 1.0
+           ),
+           let cUp = NSEvent.mouseEvent(
+            with: .leftMouseUp, location: NSPoint(x: counterPlacePt.x + 20, y: counterPlacePt.y - 15), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 30, clickCount: 1, pressure: 1.0
+           ) {
+            let countBeforeCounter = vm.annotations.count
+            canvas.mouseDown(with: cDown)
+            canvas.mouseDragged(with: cDrag)
+            canvas.mouseUp(with: cUp)
+            vm.undo()
+            t.check(
+                vm.annotations.count == countBeforeCounter,
+                "Placing and dragging a counter badge in one gesture is completely removed by a single Undo"
+            )
+        } else {
+            t.check(false, "Constructed mouse events for single-gesture counter place+drag Undo test")
+        }
+        // Verify right-click erasing a counter badge resequences remaining counters and Undo restores them
+        let rcBadge1 = PinAnnotation(tool: .counter, color: .systemRed, lineWidth: 28, points: [CGPoint(x: 0.25, y: 0.75)], text: "1")
+        let rcBadge2 = PinAnnotation(tool: .counter, color: .systemRed, lineWidth: 28, points: [CGPoint(x: 0.55, y: 0.75)], text: "2")
+        vm.annotations.append(rcBadge1)
+        vm.annotations.append(rcBadge2)
+        vm.selectedTextAnnotationID = rcBadge1.id
+        let rcBadge1Pt = NSPoint(
+            x: imgR.minX + 0.25 * imgR.width,
+            y: imgR.maxY - 0.75 * imgR.height
+        )
+        if let rightClickCounter = NSEvent.mouseEvent(
+            with: .rightMouseDown, location: rcBadge1Pt, modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 24, clickCount: 1, pressure: 1.0
+        ) {
+            canvas.rightMouseDown(with: rightClickCounter)
+            t.check(
+                vm.selectedTextAnnotationID == nil &&
+                vm.annotations.filter({ $0.tool == .counter }).map(\.text) == ["1"] &&
+                vm.nextCounterLabel == "2",
+                "Right-clicking a selected counter badge clears selection and resequences remaining counter badges"
+            )
+            vm.undo()
+            t.check(
+                vm.annotations.filter({ $0.tool == .counter }).map(\.text) == ["1", "2"] &&
+                vm.nextCounterLabel == "3",
+                "Undoing a right-click counter deletion restores both counter badges in sequence"
+            )
+            vm.annotations.removeAll(where: { $0.id == rcBadge1.id || $0.id == rcBadge2.id })
+        } else {
+            t.check(false, "Constructed rightMouseDown event for counter erase test")
+        }
+        // Verify restyling .highlighter and .mosaic annotations and mosaic color exclusion
+        let hiAnn = PinAnnotation(tool: .highlighter, color: .systemYellow, lineWidth: StrokePreset.thin.highlighterBrushWidth, points: [CGPoint(x: 0.1, y: 0.8), CGPoint(x: 0.4, y: 0.8)])
+        let mosAnn = PinAnnotation(tool: .mosaic, color: .clear, lineWidth: StrokePreset.thin.mosaicBrushWidth, points: [CGPoint(x: 0.5, y: 0.8), CGPoint(x: 0.8, y: 0.8)])
+        vm.annotations.append(hiAnn)
+        vm.annotations.append(mosAnn)
+        vm.selectedTextAnnotationID = hiAnn.id
+        vm.strokePreset = .thick
+        vm.selectedColor = .orange
+        let updatedHi = vm.annotations.first(where: { $0.id == hiAnn.id })
+        vm.selectedTextAnnotationID = mosAnn.id
+        vm.strokePreset = .medium
+        vm.selectedColor = .blue
+        let updatedMos = vm.annotations.first(where: { $0.id == mosAnn.id })
+        t.check(
+            updatedHi?.lineWidth == StrokePreset.thick.highlighterBrushWidth &&
+            updatedHi?.color == NSColor(.orange) &&
+            updatedMos?.lineWidth == StrokePreset.medium.mosaicBrushWidth &&
+            updatedMos?.color == .clear,
+            "Restyling .highlighter and .mosaic maps to tool-specific brush widths and preserves .mosaic color exclusion"
+        )
+        vm.annotations.removeAll(where: { $0.id == hiAnn.id || $0.id == mosAnn.id })
+        vm.selectedTextAnnotationID = nil
+        vm.activeTool = nil
     }
     let composite = vm.renderCompositeImage()
     t.check(composite?.size == vm.baseSize, "renderCompositeImage outputs exact baseSize")
@@ -1505,7 +1950,8 @@ func runAllTests() -> Int32 {
         unregister: { action in activeHotKeys.remove(action); return noErr }
     )
     t.check(recordingRuntime.registerAtLaunch().isEmpty && activeHotKeys.count == 3, "Shortcut runtime registers the three hotkeys through injected callbacks")
-    let recordingModel = ShortcutSettingsModel(store: shortcutStore, runtime: recordingRuntime)
+    let isolatedCrosshairStore = CrosshairConfigurationStore(defaults: shortcutDefaults)
+    let recordingModel = ShortcutSettingsModel(store: shortcutStore, runtime: recordingRuntime, crosshairStore: isolatedCrosshairStore)
     let didStartRecording = recordingModel.beginRecording(.capture)
     let recorder = ShortcutRecordingButton(title: "", target: nil, action: nil)
     recorder.configure(
@@ -1547,7 +1993,7 @@ func runAllTests() -> Int32 {
         unregister: { action in activationHotKeys.remove(action); return noErr }
     )
     _ = activationRuntime.registerAtLaunch()
-    let activationModel = ShortcutSettingsModel(store: shortcutStore, runtime: activationRuntime)
+    let activationModel = ShortcutSettingsModel(store: shortcutStore, runtime: activationRuntime, crosshairStore: isolatedCrosshairStore)
     let activationButton = ShortcutRecordingButton(title: "", target: nil, action: nil)
     activationButton.configure(
         idleTitle: "⌃X",
@@ -1666,7 +2112,7 @@ func runAllTests() -> Int32 {
         unregister: { action in activeHotKeys.remove(action); return noErr }
     )
     _ = failingRuntime.registerAtLaunch()
-    let failingModel = ShortcutSettingsModel(store: shortcutStore, runtime: failingRuntime)
+    let failingModel = ShortcutSettingsModel(store: shortcutStore, runtime: failingRuntime, crosshairStore: isolatedCrosshairStore)
     _ = failingModel.beginRecording(.capture)
     rejectedBinding = ShortcutBinding(keyCode: UInt16(kVK_ANSI_A), carbonModifiers: UInt32(controlKey))
     failingModel.accept(rejectedBinding!, for: .capture)
@@ -1691,7 +2137,7 @@ func runAllTests() -> Int32 {
         unregister: { action in contestedHotKeys.remove(action); return noErr }
     )
     _ = contestedRuntime.registerAtLaunch()
-    let contestedModel = ShortcutSettingsModel(store: shortcutStore, runtime: contestedRuntime)
+    let contestedModel = ShortcutSettingsModel(store: shortcutStore, runtime: contestedRuntime, crosshairStore: isolatedCrosshairStore)
     _ = contestedModel.beginRecording(.capture)
     refuseClipboardRestore = true
     contestedModel.cancelRecording(.capture)
@@ -1730,6 +2176,7 @@ func runAllTests() -> Int32 {
     let failedLaunchModel = ShortcutSettingsModel(
         store: shortcutStore,
         runtime: failedLaunchRuntime,
+        crosshairStore: isolatedCrosshairStore,
         launchRegistrationFailures: launchFailures
     )
     t.check(
@@ -1758,7 +2205,7 @@ func runAllTests() -> Int32 {
         unregister: { action in lostKeyHotKeys.remove(action); return noErr }
     )
     _ = lostKeyRuntime.registerAtLaunch()
-    let lostKeyModel = ShortcutSettingsModel(store: shortcutStore, runtime: lostKeyRuntime)
+    let lostKeyModel = ShortcutSettingsModel(store: shortcutStore, runtime: lostKeyRuntime, crosshairStore: isolatedCrosshairStore)
     let lostKeyController = ShortcutSettingsWindowController(model: lostKeyModel)
     let lostKeyRecordingStarted = lostKeyModel.beginRecording(.capture)
     lostKeyController.windowDidResignKey(
@@ -1778,12 +2225,25 @@ func runAllTests() -> Int32 {
         unregister: { action in restoredHotKeys.remove(action); return noErr }
     )
     _ = restoreRuntime.registerAtLaunch()
-    let restoreModel = ShortcutSettingsModel(store: shortcutStore, runtime: restoreRuntime)
+    let restoreModel = ShortcutSettingsModel(
+        store: shortcutStore,
+        runtime: restoreRuntime,
+        crosshairStore: CrosshairConfigurationStore(defaults: shortcutDefaults)
+    )
+    restoreModel.setCrosshairStyle(.dotRing)
+    restoreModel.setCrosshairColor(.yellow)
+    restoreModel.setShowLoupe(false)
+    t.check(
+        CrosshairConfigurationStore(defaults: shortcutDefaults).load() == CrosshairConfiguration(style: .dotRing, color: .yellow, showLoupe: false),
+        "Crosshair settings persist style, color, and loupe visibility in isolated UserDefaults"
+    )
     restoreModel.restoreDefaults()
     t.check(
         restoreModel.configuration == .defaults && restoreRuntime.configuration == .defaults &&
-        shortcutStore.load() == .defaults && restoredHotKeys.count == 3,
-        "Restore Defaults atomically applies and persists all factory shortcuts"
+        shortcutStore.load() == .defaults && restoredHotKeys.count == 3 &&
+        restoreModel.crosshairConfiguration == .defaults &&
+        CrosshairConfigurationStore(defaults: shortcutDefaults).load() == .defaults,
+        "Restore Defaults atomically applies and persists all factory shortcuts and crosshair settings"
     )
 
     do {

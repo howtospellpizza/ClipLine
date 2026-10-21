@@ -757,4 +757,72 @@ enum L10n {
         case .zhHans: return "\(message) 部分快捷键可能与已保存设置不一致（OSStatus：\(statuses)）。"
         }
     }
+
+    // MARK: - Capture Crosshair & Loupe Settings
+
+    static var crosshairSectionHeading: String {
+        switch AppLanguage.current {
+        case .en: return "Capture Crosshair & Loupe"
+        case .zhHans: return "截图准星与放大镜"
+        }
+    }
+
+    static var crosshairStyleLabel: String {
+        switch AppLanguage.current {
+        case .en: return "Crosshair Style"
+        case .zhHans: return "准星样式"
+        }
+    }
+
+    static func crosshairStyleName(_ style: CrosshairStyle, lang: AppLanguage = .current) -> String {
+        switch lang {
+        case .en:
+            switch style {
+            case .full: return "Full Lines"
+            case .reticle: return "Compact"
+            case .dotRing: return "Dot Ring"
+            }
+        case .zhHans:
+            switch style {
+            case .full: return "全屏十字线"
+            case .reticle: return "紧凑十字"
+            case .dotRing: return "中心圆环"
+            }
+        }
+    }
+
+    static var crosshairColorLabel: String {
+        switch AppLanguage.current {
+        case .en: return "Crosshair Color"
+        case .zhHans: return "准星颜色"
+        }
+    }
+
+    static func crosshairColorName(_ preset: CrosshairColorPreset, lang: AppLanguage = .current) -> String {
+        switch lang {
+        case .en:
+            switch preset {
+            case .cyan: return "Cyan"
+            case .green: return "Green"
+            case .red: return "Red"
+            case .yellow: return "Yellow"
+            case .white: return "White"
+            }
+        case .zhHans:
+            switch preset {
+            case .cyan: return "青色"
+            case .green: return "荧光绿"
+            case .red: return "亮红"
+            case .yellow: return "明黄"
+            case .white: return "纯白"
+            }
+        }
+    }
+
+    static var crosshairShowLoupeLabel: String {
+        switch AppLanguage.current {
+        case .en: return "Show Magnifier & HEX Color Picker (Press C to copy HEX)"
+        case .zhHans: return "显示放大镜与 HEX 取色器（截图时按 C 复制色值）"
+        }
+    }
 }
