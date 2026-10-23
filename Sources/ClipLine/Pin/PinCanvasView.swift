@@ -23,9 +23,14 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
 
     private var draggingTextAnnotationID: UUID?
     private var textDragStartMouseView: NSPoint = .zero
-    private var textDragStartNormalizedPos: CGPoint = .zero
     private var textDragStartNormalizedPoints: [CGPoint] = []
     private var textDragDidMove: Bool = false
+
+    func cancelActiveAnnotationDrag() {
+        draggingTextAnnotationID = nil
+        textDragStartNormalizedPoints = []
+        textDragDidMove = false
+    }
 
     private var isDraggingPendingField: Bool = false
     private var pendingDragStartMouseView: NSPoint = .zero
@@ -189,7 +194,8 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         let maxX = viewPts.map(\.x).max() ?? 0
         let minY = viewPts.map(\.y).min() ?? 0
         let maxY = viewPts.map(\.y).max() ?? 0
-        let pad = max(6.0, (item.lineWidth * vm.scale) / 2.0 + 4.0)
+        let basePad = max(6.0, (item.lineWidth * vm.scale) / 2.0 + 4.0)
+        let pad = item.tool == .arrow ? max(basePad, max(12.0, item.lineWidth * 3.4) * vm.scale * 0.5 + 4.0) : basePad
         return NSRect(x: minX - pad, y: minY - pad, width: max(12, maxX - minX + pad * 2), height: max(12, maxY - minY + pad * 2))
     }
 
@@ -202,6 +208,15 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         let projX = a.x + t * dx
         let projY = a.y + t * dy
         return hypot(p.x - projX, p.y - projY)
+    }
+
+    private func isPointInTriangle(_ p: NSPoint, _ a: NSPoint, _ b: NSPoint, _ c: NSPoint) -> Bool {
+        let d1 = (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y)
+        let d2 = (p.x - c.x) * (b.y - c.y) - (b.x - c.x) * (p.y - c.y)
+        let d3 = (p.x - a.x) * (c.y - a.y) - (c.x - a.x) * (p.y - a.y)
+        let hasNeg = (d1 < 0) || (d2 < 0) || (d3 < 0)
+        let hasPos = (d1 > 0) || (d2 > 0) || (d3 > 0)
+        return !(hasNeg && hasPos)
     }
 
     private func hitTestAnnotationItem(_ item: PinAnnotation, viewPoint: NSPoint) -> Bool {
@@ -240,8 +255,22 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             if distanceFromPoint(viewPoint, toSegmentStart: p0, end: p1) <= tol + 2.0 {
                 return true
             }
-            let headRadius = max(12.0, item.lineWidth * 3.4) * vm.scale * 0.55 + 4.0
-            return hypot(viewPoint.x - p1.x, viewPoint.y - p1.y) <= headRadius
+            let angle = atan2(p1.y - p0.y, p1.x - p0.x)
+            let headLength = max(12.0, item.lineWidth * 3.4) * vm.scale
+            let arrowAngle: CGFloat = .pi / 6
+            let w1 = NSPoint(
+                x: p1.x - headLength * cos(angle - arrowAngle),
+                y: p1.y - headLength * sin(angle - arrowAngle)
+            )
+            let w2 = NSPoint(
+                x: p1.x - headLength * cos(angle + arrowAngle),
+                y: p1.y - headLength * sin(angle + arrowAngle)
+            )
+            let headPad = max(5.0, tol * 0.6)
+            return isPointInTriangle(viewPoint, p1, w1, w2) ||
+                distanceFromPoint(viewPoint, toSegmentStart: p1, end: w1) <= headPad ||
+                distanceFromPoint(viewPoint, toSegmentStart: p1, end: w2) <= headPad ||
+                distanceFromPoint(viewPoint, toSegmentStart: w1, end: w2) <= headPad
         case .pen, .highlighter, .mosaic:
             for i in 0..<(viewPts.count - 1) {
                 if distanceFromPoint(viewPoint, toSegmentStart: viewPts[i], end: viewPts[i + 1]) <= tol {
@@ -254,13 +283,10 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         }
     }
 
-    func hitTestTextAnnotationIndex(viewPoint: NSPoint, includeAllShapes: Bool = true) -> Int? {
+    func hitTestTextAnnotationIndex(viewPoint: NSPoint) -> Int? {
         for idx in vm.annotations.indices.reversed() {
-            let item = vm.annotations[idx]
-            if item.tool == .text || item.tool == .counter || includeAllShapes || vm.activeTool == nil || vm.selectedTextAnnotationID == item.id {
-                if hitTestAnnotationItem(item, viewPoint: viewPoint) {
-                    return idx
-                }
+            if hitTestAnnotationItem(vm.annotations[idx], viewPoint: viewPoint) {
+                return idx
             }
         }
         return nil
@@ -435,7 +461,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         let imgRect = imageRectInView
         guard imgRect.contains(pt) else { return }
 
-        // 2. Check if clicking/dragging ANY existing annotation (.text/.counter always; other shapes when activeTool == nil or already selected)
+        // 2. Check if clicking/dragging ANY existing annotation
         if let initialHitIdx = hitTestTextAnnotationIndex(viewPoint: pt) {
             let clickedAnnotationID = vm.annotations[initialHitIdx].id
             vm.commitPendingText()
@@ -462,7 +488,6 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             }
             draggingTextAnnotationID = hitItem.id
             textDragStartMouseView = pt
-            textDragStartNormalizedPos = hitItem.points.first ?? .zero
             textDragStartNormalizedPoints = hitItem.points
             textDragDidMove = false
             NSCursor.closedHand.set()
@@ -504,7 +529,6 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
                 vm.selectedTextAnnotationID = newBadge.id
                 draggingTextAnnotationID = newBadge.id
                 textDragStartMouseView = pt
-                textDragStartNormalizedPos = normPt
                 textDragStartNormalizedPoints = [normPt]
                 textDragDidMove = true
                 window?.invalidateCursorRects(for: self)
@@ -552,10 +576,9 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         }
 
         if let dragID = draggingTextAnnotationID {
-            guard let textIdx = vm.annotations.firstIndex(where: { $0.id == dragID }) else {
-                draggingTextAnnotationID = nil
-                textDragStartNormalizedPoints = []
-                textDragDidMove = false
+            guard let textIdx = vm.annotations.firstIndex(where: { $0.id == dragID }),
+                  !textDragStartNormalizedPoints.isEmpty else {
+                cancelActiveAnnotationDrag()
                 return
             }
             if !textDragDidMove {
@@ -565,7 +588,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             let imgRect = imageRectInView
             let dxNorm = (pt.x - textDragStartMouseView.x) / max(1, imgRect.width)
             let dyNorm = (textDragStartMouseView.y - pt.y) / max(1, imgRect.height)
-            let startPts = textDragStartNormalizedPoints.isEmpty ? [textDragStartNormalizedPos] : textDragStartNormalizedPoints
+            let startPts = textDragStartNormalizedPoints
             if startPts.count == 1 {
                 let newX = max(0.0, min(0.98, startPts[0].x + dxNorm))
                 let newY = max(0.02, min(0.98, startPts[0].y + dyNorm))
@@ -645,9 +668,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         }
 
         if draggingTextAnnotationID != nil {
-            draggingTextAnnotationID = nil
-            textDragStartNormalizedPoints = []
-            textDragDidMove = false
+            cancelActiveAnnotationDrag()
             window?.invalidateCursorRects(for: self)
             updateCursorForViewPoint(pt)
             return
@@ -757,22 +778,10 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
     override func rightMouseDown(with event: NSEvent) {
         let pt = convert(event.locationInWindow, from: nil)
         guard imageRectInView.contains(pt) else { return }
-        if let hitIdx = hitTestTextAnnotationIndex(viewPoint: pt, includeAllShapes: true) {
+        if let hitIdx = hitTestTextAnnotationIndex(viewPoint: pt) {
             let targetID = vm.annotations[hitIdx].id
             vm.commitPendingText()
-            if let resolvedIdx = vm.annotations.firstIndex(where: { $0.id == targetID }) {
-                vm.recordUndoSnapshot()
-                let removed = vm.annotations.remove(at: resolvedIdx)
-                if vm.selectedTextAnnotationID == removed.id {
-                    vm.selectedTextAnnotationID = nil
-                }
-                if removed.tool == .counter {
-                    vm.resequenceCounterAnnotations()
-                }
-                window?.invalidateCursorRects(for: self)
-                needsDisplay = true
-                vm.updateToolbarPanelPosition()
-            }
+            _ = vm.removeAnnotation(id: targetID)
         }
     }
 

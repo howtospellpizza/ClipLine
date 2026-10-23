@@ -761,7 +761,6 @@ final class PixPinSelectionView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         guard let s = startDragPos, let e = currentDragPos else {
-            onFinish(nil)
             return
         }
         let rawEnd = convert(event.locationInWindow, from: nil)

@@ -616,6 +616,14 @@ func runAllTests() -> Int32 {
                 multiCaptureFinishedCount == 0 && multiController.overlayWindows.count == 2,
                 "Releasing a drag even 1pt outside its originating display cancels the cross-screen drag instead of capturing a clipped strip"
             )
+            // Also verify cross-screen activation handoff clearing Screen A's drag before mouseUp does not dismiss capture overlays
+            viewA.mouseDown(with: downA)
+            multiController.activateOverlayView(viewB)
+            viewA.mouseUp(with: upOutA)
+            t.check(
+                multiCaptureFinishedCount == 0 && multiController.overlayWindows.count == 2,
+                "Cross-screen overlay activation before mouseUp cancels only the active drag and keeps all capture overlays open"
+            )
         } else {
             t.check(false, "Constructed cross-display drag events for Screen A")
         }
@@ -1634,6 +1642,80 @@ func runAllTests() -> Int32 {
         vm.annotations.removeAll(where: { $0.id == hiAnn.id || $0.id == mosAnn.id })
         vm.selectedTextAnnotationID = nil
         vm.activeTool = nil
+
+        // Verify thick (.thick = 7.5pt) arrow outer wing tip is hit-testable
+        let thickArrow = PinAnnotation(tool: .arrow, color: .systemRed, lineWidth: StrokePreset.thick.strokeLineWidth, points: [CGPoint(x: 0.2, y: 0.5), CGPoint(x: 0.8, y: 0.5)])
+        vm.annotations.append(thickArrow)
+        let thickHeadLength: CGFloat = StrokePreset.thick.strokeLineWidth * 3.4 * vm.scale
+        let thickWingPt = NSPoint(
+            x: imgR.minX + imgR.width * 0.8 - thickHeadLength * cos(.pi / 6),
+            y: imgR.maxY - imgR.height * 0.5 + thickHeadLength * sin(.pi / 6)
+        )
+        t.check(
+            canvas.hitTestTextAnnotationIndex(viewPoint: thickWingPt) != nil,
+            "Thick arrow outer arrowhead wing tips are hit-testable for dragging and right-click erasing"
+        )
+        vm.annotations.removeAll(where: { $0.id == thickArrow.id })
+
+        // Verify double-clicking a text annotation and committing without changes does not push a no-op undo snapshot
+        let unchangedTextAnn = PinAnnotation(
+            tool: .text,
+            color: NSColor(vm.selectedColor),
+            lineWidth: vm.strokePreset.textFontSize,
+            points: [CGPoint(x: 0.3, y: 0.4)],
+            text: "NoOpCheck",
+            textBackgroundStyle: vm.textBackgroundStyle
+        )
+        vm.recordUndoSnapshot()
+        vm.annotations.append(unchangedTextAnn)
+        let undoCountBeforeNoOpText = vm.undoHistory.count
+        vm.editingExistingTextAnnotationID = unchangedTextAnn.id
+        vm.editingOriginalAnnotationSnapshot = unchangedTextAnn
+        vm.pendingTextNormalizedPos = unchangedTextAnn.points[0]
+        vm.pendingTextString = unchangedTextAnn.text
+        vm.commitPendingText()
+        t.check(
+            vm.undoHistory.count == undoCountBeforeNoOpText,
+            "Committing an existing text annotation without changes does not push a redundant undo snapshot"
+        )
+
+        // Verify pressing Undo mid-drag cancels the active drag so subsequent mouseDragged events do not overwrite the undo
+        let midDragStartPt = NSPoint(
+            x: imgR.minX + 0.3 * imgR.width + 6,
+            y: imgR.maxY - 0.4 * imgR.height - 6
+        )
+        if let mdDown = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: midDragStartPt, modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 40, clickCount: 1, pressure: 1.0
+        ),
+           let mdMove1 = NSEvent.mouseEvent(
+            with: .leftMouseDragged, location: NSPoint(x: midDragStartPt.x + 25, y: midDragStartPt.y - 20), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 41, clickCount: 1, pressure: 1.0
+           ),
+           let mdMove2 = NSEvent.mouseEvent(
+            with: .leftMouseDragged, location: NSPoint(x: midDragStartPt.x + 50, y: midDragStartPt.y - 40), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 42, clickCount: 1, pressure: 1.0
+           ),
+           let mdUp = NSEvent.mouseEvent(
+            with: .leftMouseUp, location: NSPoint(x: midDragStartPt.x + 50, y: midDragStartPt.y - 40), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 43, clickCount: 1, pressure: 1.0
+           ) {
+            canvas.mouseDown(with: mdDown)
+            canvas.mouseDragged(with: mdMove1)
+            vm.undo()
+            let posAfterMidDragUndo = vm.annotations.first(where: { $0.id == unchangedTextAnn.id })?.points.first
+            canvas.mouseDragged(with: mdMove2)
+            canvas.mouseUp(with: mdUp)
+            let posAfterContinuedMove = vm.annotations.first(where: { $0.id == unchangedTextAnn.id })?.points.first
+            t.check(
+                posAfterMidDragUndo == CGPoint(x: 0.3, y: 0.4) &&
+                posAfterContinuedMove == CGPoint(x: 0.3, y: 0.4),
+                "Invoking Undo during an active annotation drag cancels the drag so further mouse movement does not overwrite the restored position"
+            )
+        } else {
+            t.check(false, "Constructed mouse events for mid-drag Undo cancellation test")
+        }
+        vm.annotations.removeAll(where: { $0.id == unchangedTextAnn.id })
     }
     let composite = vm.renderCompositeImage()
     t.check(composite?.size == vm.baseSize, "renderCompositeImage outputs exact baseSize")
@@ -2152,18 +2234,26 @@ func runAllTests() -> Int32 {
         "Starting another recorder does not silently clear an unresolved restoration error"
     )
     contestedModel.cancelRecording(.captureSecondary)
+    contestedModel.setCrosshairStyle(.dotRing)
+    contestedModel.setCrosshairColor(.yellow)
+    contestedModel.setShowLoupe(false)
+    let customCrosshairBeforeFailedRestore = CrosshairConfiguration(style: .dotRing, color: .yellow, showLoupe: false)
     contestedModel.restoreDefaults()
     t.check(
         contestedRuntime.registeredActions == Set([.capture, .captureSecondary]) &&
-        contestedModel.errorMessage?.contains("-9878") == true && shortcutStore.load() == .defaults,
-        "Restore Defaults retries a missing unchanged shortcut and keeps a failed retry visible"
+        contestedModel.errorMessage?.contains("-9878") == true &&
+        contestedModel.crosshairConfiguration == customCrosshairBeforeFailedRestore &&
+        isolatedCrosshairStore.load() == customCrosshairBeforeFailedRestore,
+        "Restore Defaults retries a missing unchanged shortcut, keeps a failed retry visible, and preserves crosshair settings when shortcut registration fails"
     )
     refuseClipboardRestore = false
     contestedModel.restoreDefaults()
     t.check(
         contestedRuntime.registeredActions.count == 3 && contestedModel.errorMessage == nil &&
-        shortcutStore.load() == .defaults,
-        "Restore Defaults retries and recovers the previously contested shortcut"
+        shortcutStore.load() == .defaults &&
+        contestedModel.crosshairConfiguration == .defaults &&
+        isolatedCrosshairStore.load() == .defaults,
+        "Restore Defaults retries and atomically recovers shortcuts and crosshair settings once conflict resolves"
     )
 
     var failedLaunchHotKeys: Set<ShortcutAction> = []
