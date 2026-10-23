@@ -103,13 +103,13 @@ final class ShortcutSettingsModel: ObservableObject {
 
     func restoreDefaults() {
         if let recordingAction { cancelRecording(recordingAction) }
-        crosshairConfiguration = .defaults
-        crosshairStore.save(.defaults)
         do {
             let data = try store.encodedData(for: .defaults)
             try runtime.apply(.defaults)
             store.write(data)
             configuration = .defaults
+            crosshairConfiguration = .defaults
+            crosshairStore.save(.defaults)
             errorMessage = nil
         } catch {
             errorMessage = L10n.shortcutRuntimeMessage(error)

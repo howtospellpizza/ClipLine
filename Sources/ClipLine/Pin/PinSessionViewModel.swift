@@ -110,18 +110,7 @@ final class PinSessionViewModel: ObservableObject {
 
     var currentToolLineWidth: CGFloat {
         guard let tool = activeTool else { return strokePreset.strokeLineWidth }
-        switch tool {
-        case .mosaic:
-            return strokePreset.mosaicBrushWidth
-        case .highlighter:
-            return strokePreset.highlighterBrushWidth
-        case .counter:
-            return strokePreset.counterBadgeDiameter
-        case .text:
-            return strokePreset.textFontSize
-        case .rect, .arrow, .pen:
-            return strokePreset.strokeLineWidth
-        }
+        return Self.presetLineWidth(strokePreset, for: tool)
     }
 
     var nextCounterLabel: String {
@@ -465,7 +454,19 @@ final class PinSessionViewModel: ObservableObject {
         }
     }
 
+    private static func colorsMatch(_ a: NSColor, _ b: NSColor) -> Bool {
+        guard let ca = a.usingColorSpace(.sRGB),
+              let cb = b.usingColorSpace(.sRGB) else {
+            return a == b
+        }
+        return abs(ca.redComponent - cb.redComponent) < 0.002 &&
+            abs(ca.greenComponent - cb.greenComponent) < 0.002 &&
+            abs(ca.blueComponent - cb.blueComponent) < 0.002 &&
+            abs(ca.alphaComponent - cb.alphaComponent) < 0.002
+    }
+
     func undo() {
+        hostingPanel?.canvasView?.cancelActiveAnnotationDrag()
         if let previous = undoHistory.popLast() {
             annotations = previous
             if let selID = selectedTextAnnotationID,
@@ -498,14 +499,15 @@ final class PinSessionViewModel: ObservableObject {
     }
 
     @discardableResult
-    func deleteSelectedAnnotation() -> Bool {
-        guard let selID = selectedTextAnnotationID,
-              let idx = annotations.firstIndex(where: { $0.id == selID }) else {
+    func removeAnnotation(id: UUID) -> Bool {
+        guard let idx = annotations.firstIndex(where: { $0.id == id }) else {
             return false
         }
         recordUndoSnapshot()
         let removed = annotations.remove(at: idx)
-        selectedTextAnnotationID = nil
+        if selectedTextAnnotationID == removed.id {
+            selectedTextAnnotationID = nil
+        }
         if removed.tool == .counter {
             resequenceCounterAnnotations()
         }
@@ -515,6 +517,14 @@ final class PinSessionViewModel: ObservableObject {
         }
         updateToolbarPanelPosition()
         return true
+    }
+
+    @discardableResult
+    func deleteSelectedAnnotation() -> Bool {
+        guard let selID = selectedTextAnnotationID else {
+            return false
+        }
+        return removeAnnotation(id: selID)
     }
 
     func cancelPendingTextEditing() {
@@ -558,16 +568,30 @@ final class PinSessionViewModel: ObservableObject {
         let trimmed = pendingTextString.trimmingCharacters(in: .whitespacesAndNewlines)
         if let editID = editingExistingTextAnnotationID,
            let idx = annotations.firstIndex(where: { $0.id == editID && $0.tool == .text }) {
-            recordUndoSnapshot()
+            let current = annotations[idx]
+            let nextColor = NSColor(selectedColor)
+            let nextWidth = strokePreset.textFontSize
+            let nextBg = textBackgroundStyle
             if trimmed.isEmpty {
+                recordUndoSnapshot()
                 annotations.remove(at: idx)
                 selectedTextAnnotationID = nil
             } else {
-                annotations[idx].color = NSColor(selectedColor)
-                annotations[idx].lineWidth = strokePreset.textFontSize
-                annotations[idx].points = [pos]
-                annotations[idx].text = trimmed
-                annotations[idx].textBackgroundStyle = textBackgroundStyle
+                let oldPt = current.points.first ?? .zero
+                let posChanged = hypot(oldPt.x - pos.x, oldPt.y - pos.y) > 0.0005
+                let didChange = current.text != trimmed ||
+                    posChanged ||
+                    abs(current.lineWidth - nextWidth) > 0.001 ||
+                    current.textBackgroundStyle != nextBg ||
+                    !Self.colorsMatch(current.color, nextColor)
+                if didChange {
+                    recordUndoSnapshot()
+                    annotations[idx].color = nextColor
+                    annotations[idx].lineWidth = nextWidth
+                    annotations[idx].points = [pos]
+                    annotations[idx].text = trimmed
+                    annotations[idx].textBackgroundStyle = nextBg
+                }
                 selectedTextAnnotationID = editID
             }
         } else if !trimmed.isEmpty {
