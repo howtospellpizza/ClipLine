@@ -55,15 +55,7 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
                 if self.isCapturing || NSApp.modalWindow != nil {
                     return event
                 }
-                if let keyPanel = NSApp.keyWindow as? PinFloatingPanel {
-                    if keyPanel.viewModel?.pendingTextNormalizedPos != nil {
-                        return event
-                    }
-                    keyPanel.onClosePanel?()
-                    return nil
-                }
-                if let tbPanel = NSApp.keyWindow as? PinToolbarPanel {
-                    tbPanel.onEscape?()
+                if self.handleEscapeOnActivePin() {
                     return nil
                 }
             }
@@ -254,7 +246,10 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
     }
 
     func startInteractiveCapture() {
-        guard !isCapturing else { return }
+        if isCapturing {
+            captureController.cancelActiveCapture(reason: "retriggered")
+            isCapturing = false
+        }
         isCapturing = true
 
         captureController.beginCapture { [weak self] result in
@@ -264,6 +259,18 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
                 self.createPinWindow(fromCapture: res)
             }
         }
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        guard isCapturing else { return }
+        captureController.cancelActiveCapture(reason: "app resigned active")
+        isCapturing = false
+    }
+
+    func applicationDidChangeScreenParameters(_ notification: Notification) {
+        guard isCapturing else { return }
+        captureController.cancelActiveCapture(reason: "screen parameters changed")
+        isCapturing = false
     }
 
     func pinFromClipboard() {
@@ -303,7 +310,7 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
         // 1. Pure AppKit Image Canvas Panel (1:1 matched to image + 16pt margin)
         let panel = PinFloatingPanel(
             contentRect: frame,
-            styleMask: [.nonactivatingPanel, .borderless],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
@@ -330,11 +337,12 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
         // 2. Detached Auto-Sizing Toolbar Panel (never clips or collides with the image panel!)
         let tbPanel = PinToolbarPanel(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 48),
-            styleMask: [.nonactivatingPanel, .borderless],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
         tbPanel.isFloatingPanel = true
+        tbPanel.becomesKeyOnlyIfNeeded = true
         tbPanel.level = .floating
         tbPanel.animationBehavior = .none
         tbPanel.backgroundColor = .clear
@@ -376,5 +384,54 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
         panel.makeFirstResponder(canvas)
         panel.invalidateCursorRects(for: canvas)
         vm.updateToolbarPanelPosition()
+    }
+
+    /// Handles Escape key while ClipLine is active, closing the key Pin/Toolbar panel or, if `keyWindow` is momentarily nil
+    /// right after capture/toolbar transition, falling back to the frontmost visible Pin panel.
+    @discardableResult
+    func handleEscapeOnActivePin() -> Bool {
+        if settingsWindowController?.window?.isVisible == true {
+            return false
+        }
+        if ScreenCaptureOverlayController.isPermissionAlertVisible {
+            return false
+        }
+        if let keyWindow = NSApp.keyWindow {
+            if let keyPanel = keyWindow as? PinFloatingPanel {
+                if keyPanel.viewModel?.pendingTextNormalizedPos != nil {
+                    return false
+                }
+                keyPanel.onClosePanel?()
+                return true
+            }
+            if let tbPanel = keyWindow as? PinToolbarPanel {
+                if tbPanel.viewModel?.pendingTextNormalizedPos != nil {
+                    tbPanel.viewModel?.cancelPendingTextEditing()
+                    return true
+                }
+                tbPanel.onEscape?()
+                return true
+            }
+            return false
+        }
+        let windowNumberOrder = NSWindow.windowNumbers(options: [])?.map(\.intValue) ?? []
+        var bestPinPanel: PinFloatingPanel?
+        var bestOrderIndex = Int.max
+        for panel in activePanels.values where panel.isVisible {
+            let idx = windowNumberOrder.firstIndex(of: panel.windowNumber) ?? Int.max
+            if idx <= bestOrderIndex {
+                bestOrderIndex = idx
+                bestPinPanel = panel
+            }
+        }
+        if let frontPanel = bestPinPanel ?? activePanels.values.first(where: { $0.isVisible }) {
+            if frontPanel.viewModel?.pendingTextNormalizedPos != nil {
+                frontPanel.viewModel?.cancelPendingTextEditing()
+                return true
+            }
+            frontPanel.onClosePanel?()
+            return true
+        }
+        return false
     }
 }

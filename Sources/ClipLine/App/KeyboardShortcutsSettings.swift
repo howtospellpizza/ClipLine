@@ -117,10 +117,21 @@ final class ShortcutSettingsModel: ObservableObject {
     }
 
     private func restoreAfterFailure() {
-        guard runtime.isSuspended else { return }
+        guard runtime.isSuspended || runtime.registeredActions.count < ShortcutAction.allCases.count else { return }
         do { try runtime.resume() }
         catch {
             errorMessage = (errorMessage ?? "") + "\n" + L10n.shortcutRuntimeMessage(error)
+        }
+    }
+
+    func retryMissingRegistrationsIfNeeded() {
+        guard recordingAction == nil,
+              runtime.registeredActions.count < ShortcutAction.allCases.count else { return }
+        do {
+            try runtime.resume()
+            errorMessage = nil
+        } catch {
+            errorMessage = L10n.shortcutRuntimeMessage(error)
         }
     }
 }
@@ -466,6 +477,7 @@ final class ShortcutSettingsWindowController: NSWindowController, NSWindowDelega
 
     func show() {
         guard let window else { return }
+        model.retryMissingRegistrationsIfNeeded()
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         if !window.isVisible { window.center() }

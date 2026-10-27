@@ -11,7 +11,7 @@ final class ScreenCaptureOverlayController {
     private(set) var overlayWindows: [NSPanel] = []
     private var completion: ((CaptureSelectionResult?) -> Void)?
     private var isCursorHidden = false
-    var preflightAccess: () -> Bool = { CGPreflightScreenCaptureAccess() }
+    var preflightAccess: () -> Bool = { ScreenCaptureOverlayController.hasLiveScreenCaptureAccess() }
     var requestAccess: () -> Bool = { CGRequestScreenCaptureAccess() }
     var presentPermissionAlert: () -> Void = { ScreenCaptureOverlayController.presentScreenRecordingPermissionAlertIfNeeded() }
 
@@ -21,12 +21,46 @@ final class ScreenCaptureOverlayController {
         return unsafeBitCast(sym, to: (@convention(c) (CGDirectDisplayID) -> Unmanaged<CGImage>?).self)
     }()
 
+    nonisolated static func canReadWindowNamesFromWindowList(
+        _ windowList: [[String: Any]],
+        ownPID: pid_t = ProcessInfo.processInfo.processIdentifier
+    ) -> Bool {
+        var sawExternalApplicationWindow = false
+        for entry in windowList {
+            let ownerPID = (entry[kCGWindowOwnerPID as String] as? pid_t) ?? 0
+            if ownerPID == ownPID { continue }
+            let ownerName = entry[kCGWindowOwnerName as String] as? String
+            if ownerName == "Window Server" || ownerName == "Dock" {
+                continue
+            }
+            sawExternalApplicationWindow = true
+            if entry[kCGWindowName as String] != nil {
+                return true
+            }
+        }
+        return !sawExternalApplicationWindow
+    }
+
+    nonisolated static func hasLiveScreenCaptureAccess(
+        preflight: () -> Bool = { CGPreflightScreenCaptureAccess() },
+        windowListProvider: () -> [[String: Any]]? = {
+            CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        }
+    ) -> Bool {
+        guard preflight() else { return false }
+        guard let infoList = windowListProvider(), !infoList.isEmpty else {
+            return true
+        }
+        return canReadWindowNamesFromWindowList(infoList)
+    }
+
     @discardableResult
     func ensureScreenCaptureAccess(showAlertOnDenial: Bool) -> Bool {
         if preflightAccess() {
             return true
         }
-        if requestAccess() || preflightAccess() {
+        _ = requestAccess()
+        if preflightAccess() {
             return true
         }
         if showAlertOnDenial {
@@ -96,7 +130,7 @@ final class ScreenCaptureOverlayController {
         }
 
         guard descriptors.contains(where: { $0.isInitialCursorScreen }) else {
-            Self.presentScreenRecordingPermissionAlertIfNeeded()
+            presentPermissionAlert()
             completion(nil)
             return
         }
@@ -128,11 +162,12 @@ final class ScreenCaptureOverlayController {
 
             let panel = CaptureOverlayPanel(
                 contentRect: desc.screenFrame,
-                styleMask: [.borderless, .nonactivatingPanel],
+                styleMask: [.borderless],
                 backing: .buffered,
                 defer: false
             )
             panel.level = .screenSaver
+            panel.hidesOnDeactivate = false
             panel.isOpaque = true
             panel.backgroundColor = .clear
             panel.hasShadow = false
@@ -210,6 +245,16 @@ final class ScreenCaptureOverlayController {
         let cb = completion
         completion = nil
         cb?(result)
+    }
+
+    var hasActiveOverlays: Bool {
+        completion != nil && overlayWindows.contains(where: { $0.isVisible })
+    }
+
+    func cancelActiveCapture(reason: String) {
+        guard completion != nil || !overlayWindows.isEmpty else { return }
+        fputs("[ClipLine] Cancelling active capture session (\(reason))\n", stderr)
+        finish(with: nil)
     }
 
     nonisolated static func convertCGWindowBoundsToViewRect(
@@ -300,6 +345,10 @@ final class ScreenCaptureOverlayController {
     }
 
     private static var permissionHUDPanel: NSPanel?
+
+    static var isPermissionAlertVisible: Bool {
+        permissionHUDPanel?.isVisible == true
+    }
 
     nonisolated static func currentExecutableFileURL() -> URL {
         if let execURL = Bundle.main.executableURL {
@@ -404,7 +453,6 @@ final class ScreenCaptureOverlayController {
     }
 
     static func presentScreenRecordingPermissionAlertIfNeeded() {
-        guard !CGPreflightScreenCaptureAccess() else { return }
         NSApp.activate(ignoringOtherApps: true)
         let panel = makeScreenRecordingPermissionPanel()
         panel.makeKeyAndOrderFront(nil)
