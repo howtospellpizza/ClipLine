@@ -298,7 +298,7 @@ final class ShortcutRuntime {
     }
 
     func resume() throws {
-        guard isSuspended else { return }
+        guard isSuspended || registeredActions.count < ShortcutAction.allCases.count else { return }
         let failures = restore(previous: Set(ShortcutAction.allCases), using: configuration)
         isSuspended = false
         if !failures.isEmpty { throw ShortcutRuntimeError.restorationFailed(failures) }

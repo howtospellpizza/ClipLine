@@ -434,6 +434,9 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if !NSApp.isActive {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         window?.makeKeyAndOrderFront(nil)
         let pt = convert(event.locationInWindow, from: nil)
         let screenPt = NSEvent.mouseLocation

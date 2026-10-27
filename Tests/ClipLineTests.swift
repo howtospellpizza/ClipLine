@@ -199,6 +199,67 @@ func runAllTests() -> Int32 {
         deniedCaptureCompletedWithNil && requestAttempts == 2 && alertPresentations == 1 && preflightChecks >= 2,
         "beginCapture aborts before showing wallpaper-only fullscreen overlay when Screen Recording permission is denied"
     )
+    // Verify stale TCC scenario: preflightAccess (live check) returns false, even if requestAccess() returns cached true
+    let staleTCCController = ScreenCaptureOverlayController()
+    var stalePreflightCalls = 0
+    var staleRequestCalls = 0
+    var staleAlertCalls = 0
+    staleTCCController.preflightAccess = {
+        stalePreflightCalls += 1
+        return false
+    }
+    staleTCCController.requestAccess = {
+        staleRequestCalls += 1
+        return true
+    }
+    staleTCCController.presentPermissionAlert = {
+        staleAlertCalls += 1
+    }
+    var staleCaptureCompletedWithNil = false
+    staleTCCController.beginCapture { result in
+        staleCaptureCompletedWithNil = (result == nil)
+    }
+    t.check(
+        staleCaptureCompletedWithNil && stalePreflightCalls == 2 && staleRequestCalls == 1 && staleAlertCalls == 1,
+        "ensureScreenCaptureAccess re-verifies live preflightAccess after requestAccess() returns true and presents permission HUD on stale TCC"
+    )
+    t.check(
+        !ScreenCaptureOverlayController.canReadWindowNamesFromWindowList([
+            [kCGWindowOwnerPID as String: pid_t(1255), kCGWindowOwnerName as String: "Window Server", kCGWindowLayer as String: 24, kCGWindowName as String: "Menubar"],
+            [kCGWindowOwnerPID as String: pid_t(1256), kCGWindowOwnerName as String: "Dock", kCGWindowLayer as String: 20, kCGWindowName as String: "Desktop Picture"],
+            [kCGWindowOwnerPID as String: pid_t(2566), kCGWindowOwnerName as String: "Google Chrome", kCGWindowLayer as String: 0]
+        ], ownPID: 999) &&
+        ScreenCaptureOverlayController.canReadWindowNamesFromWindowList([
+            [kCGWindowOwnerPID as String: pid_t(1255), kCGWindowOwnerName as String: "Window Server", kCGWindowLayer as String: 24, kCGWindowName as String: "Menubar"],
+            [kCGWindowOwnerPID as String: pid_t(2566), kCGWindowOwnerName as String: "Google Chrome", kCGWindowLayer as String: 0, kCGWindowName as String: ""]
+        ], ownPID: 999) &&
+        ScreenCaptureOverlayController.canReadWindowNamesFromWindowList([
+            [kCGWindowOwnerPID as String: pid_t(1255), kCGWindowOwnerName as String: "Window Server", kCGWindowLayer as String: 24, kCGWindowName as String: "Menubar"],
+            [kCGWindowOwnerPID as String: pid_t(999), kCGWindowOwnerName as String: "clipline", kCGWindowLayer as String: 3, kCGWindowName as String: "Keyboard Shortcuts"]
+        ], ownPID: 999),
+        "canReadWindowNamesFromWindowList ignores Window Server/Dock names, denies nameless external windows, and treats desktops with no external app windows as inconclusive-authorized"
+    )
+    t.check(
+        ScreenCaptureOverlayController.hasLiveScreenCaptureAccess(
+            preflight: { true },
+            windowListProvider: { nil }
+        ) &&
+        ScreenCaptureOverlayController.hasLiveScreenCaptureAccess(
+            preflight: { true },
+            windowListProvider: { [] }
+        ) &&
+        !ScreenCaptureOverlayController.hasLiveScreenCaptureAccess(
+            preflight: { false },
+            windowListProvider: { [] }
+        ) &&
+        ScreenCaptureOverlayController.hasLiveScreenCaptureAccess(
+            preflight: { true },
+            windowListProvider: {
+                [[kCGWindowOwnerPID as String: pid_t(2566), kCGWindowOwnerName as String: "Google Chrome", kCGWindowName as String: "Tab"]]
+            }
+        ),
+        "hasLiveScreenCaptureAccess treats empty/nil window list as inconclusive when preflight is true and succeeds when non-system kCGWindowName is present"
+    )
 
     // Window auto-detection & single-click snap vs drag override
     let convertedWindowRect = ScreenCaptureOverlayController.convertCGWindowBoundsToViewRect(
@@ -648,6 +709,10 @@ func runAllTests() -> Int32 {
                 multiController.overlayWindows.isEmpty,
                 "Pressing Space after moving to secondary screen captures secondary screen and closes all overlay windows"
             )
+            t.check(
+                panelA.hidesOnDeactivate == false && panelB.hidesOnDeactivate == false,
+                "CaptureOverlayPanel sets hidesOnDeactivate = false so overlays do not silently vanish on transient deactivation"
+            )
         } else {
             t.check(false, "Constructed mouseMoved and Space keyEvent for Screen B")
         }
@@ -655,6 +720,22 @@ func runAllTests() -> Int32 {
         t.check(false, "ScreenCaptureOverlayController created two overlay panels for multi-display test")
         multiController.finish(with: nil)
     }
+
+    // Verify cancelActiveCapture(reason:) tears down overlays and invokes completion(nil) so isCapturing can never stay wedged
+    let cancelController = ScreenCaptureOverlayController()
+    var cancelCallbackFired = false
+    cancelController.installCaptureOverlays(
+        descriptors: [(screenFrame: screenFrame, cgImage: cgScreen, candidateWindowRects: [], isInitialCursorScreen: true)],
+        hideSystemCursor: false,
+        completion: { res in
+            cancelCallbackFired = (res == nil)
+        }
+    )
+    cancelController.cancelActiveCapture(reason: "test recovery")
+    t.check(
+        cancelCallbackFired && cancelController.overlayWindows.isEmpty && !cancelController.hasActiveOverlays,
+        "cancelActiveCapture tears down active overlays and fires completion(nil) to clear capture session state"
+    )
 
     var openedSettingsFromHUD = false
     var revealedBinaryFromHUD = false
@@ -910,6 +991,12 @@ func runAllTests() -> Int32 {
         "PinToolbarPanel shares .floating level and is attached as an ordered-above child window of its own PinFloatingPanel"
     )
     t.check(tbPanel.viewModel === vm, "PinToolbarPanel.viewModel is wired to PinSessionViewModel")
+    t.check(
+        !pinPanel.styleMask.contains(.nonactivatingPanel) &&
+        !tbPanel.styleMask.contains(.nonactivatingPanel) &&
+        tbPanel.becomesKeyOnlyIfNeeded,
+        "PinFloatingPanel and PinToolbarPanel omit .nonactivatingPanel so WindowServer CPS focus stack stays consistent and clicking Pin retains keyboard focus"
+    )
 
     // Verify multi-pin overlapping stacking: Pin B and its toolbar stay above Pin A and Pin A's toolbar when B is active,
     // and clicking/activating Pin A brings Pin A and Pin A's toolbar above Pin B and Pin B's toolbar!
@@ -990,7 +1077,26 @@ func runAllTests() -> Int32 {
             detail: "detachedWhileClipped=\(detachedWhileClipped), indices: tbB=\(idxTbB3), pinB=\(idxPinB3), tbA=\(idxTbA3)"
         )
 
-        pinPanelB.onClosePanel?()
+        // Verify visible Permission HUD does NOT trigger handleEscapeOnActivePin fallback to close a background Pin
+        ScreenCaptureOverlayController.presentScreenRecordingPermissionAlertIfNeeded()
+        let handledEscapeWhilePermissionHUDVisible = daemon.handleEscapeOnActivePin()
+        t.check(
+            !handledEscapeWhilePermissionHUDVisible && !secondPinVM.isClosed && pinPanelB.isVisible,
+            "handleEscapeOnActivePin does not close a background Pin panel when the Permission HUD is visible"
+        )
+        ScreenCaptureOverlayController.dismissScreenRecordingPermissionAlert()
+
+        // Ensure Pin B is frontmost, then verify handleEscapeOnActivePin() closes Pin B
+        pinPanelB.makeKeyAndOrderFront(nil)
+        secondPinVM.updateToolbarPanelPosition()
+        let handledEscapeOnPinB = daemon.handleEscapeOnActivePin()
+        t.check(
+            handledEscapeOnPinB && secondPinVM.isClosed && !pinPanelB.isVisible,
+            "handleEscapeOnActivePin closes the frontmost visible Pin B panel"
+        )
+        if !secondPinVM.isClosed {
+            pinPanelB.onClosePanel?()
+        }
         pinPanel.makeKeyAndOrderFront(nil)
         vm.updateToolbarPanelPosition()
     }
@@ -2247,6 +2353,11 @@ func runAllTests() -> Int32 {
         "Restore Defaults retries a missing unchanged shortcut, keeps a failed retry visible, and preserves crosshair settings when shortcut registration fails"
     )
     refuseClipboardRestore = false
+    contestedModel.retryMissingRegistrationsIfNeeded()
+    t.check(
+        contestedRuntime.registeredActions.count == 3 && contestedModel.errorMessage == nil,
+        "retryMissingRegistrationsIfNeeded recovers missing shortcuts without resetting crosshair settings once conflict resolves"
+    )
     contestedModel.restoreDefaults()
     t.check(
         contestedRuntime.registeredActions.count == 3 && contestedModel.errorMessage == nil &&

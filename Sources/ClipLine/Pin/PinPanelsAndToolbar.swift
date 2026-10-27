@@ -279,6 +279,10 @@ final class PinToolbarPanel: NSPanel {
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 {
+            if let vm = viewModel, vm.pendingTextNormalizedPos != nil {
+                vm.cancelPendingTextEditing()
+                return
+            }
             onEscape?()
             return
         }

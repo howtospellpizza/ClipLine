@@ -117,6 +117,7 @@ if args.count >= 2 {
                 deliverImmediately: true
             )
         }
+        CFRunLoopRunInMode(.defaultMode, 0.05, false)
         exit(0)
     } else if arg == "-i" || arg == "--capture" {
         for channel in NotificationChannels.captureChannels {
@@ -127,6 +128,7 @@ if args.count >= 2 {
                 deliverImmediately: true
             )
         }
+        CFRunLoopRunInMode(.defaultMode, 0.05, false)
         exit(0)
     }
 }

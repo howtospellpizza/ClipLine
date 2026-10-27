@@ -44,6 +44,7 @@ enum SingleInstanceLock {
                     deliverImmediately: true
                 )
             }
+            CFRunLoopRunInMode(.defaultMode, 0.05, false)
         }
         return false
     }
