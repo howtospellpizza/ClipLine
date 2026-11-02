@@ -169,6 +169,77 @@ enum L10n {
         }
     }
 
+    static var toolbarQRTooltip: String {
+        switch AppLanguage.current {
+        case .en: return "Scan QR code / barcode and copy (Q)"
+        case .zhHans: return "识别图中二维码/条形码并复制 (Q)"
+        }
+    }
+
+    static var toastQRInProgress: String {
+        switch AppLanguage.current {
+        case .en: return "Scanning QR code / barcode..."
+        case .zhHans: return "正在识别二维码/条形码..."
+        }
+    }
+
+    static func toastQRCopied(count: Int, openedURL: Bool, lang: AppLanguage = .current) -> String {
+        switch lang {
+        case .en:
+            if openedURL {
+                return "QR link copied & opened in browser"
+            }
+            return count > 1 ? "Copied \(count) QR/barcode payloads" : "QR/barcode content copied"
+        case .zhHans:
+            if openedURL {
+                return "已复制二维码链接并在浏览器打开"
+            }
+            return count > 1 ? "已识别并复制 \(count) 个二维码/条码内容" : "二维码/条码内容已复制"
+        }
+    }
+
+    static var toastQRNotFound: String {
+        switch AppLanguage.current {
+        case .en: return "No QR code or barcode detected"
+        case .zhHans: return "未检测到二维码或条形码"
+        }
+    }
+
+    static var toastQRError: String {
+        switch AppLanguage.current {
+        case .en: return "QR/barcode scan failed"
+        case .zhHans: return "二维码识别出错"
+        }
+    }
+
+    static var alertQROpenURLTitle: String {
+        switch AppLanguage.current {
+        case .en: return "Open QR Code Link in Browser?"
+        case .zhHans: return "二维码包含网页链接，是否在浏览器中打开？"
+        }
+    }
+
+    static func alertQROpenURLBody(_ urlString: String, lang: AppLanguage = .current) -> String {
+        switch lang {
+        case .en: return "The link has already been copied to your clipboard:\n\(urlString)"
+        case .zhHans: return "该链接已复制到剪贴板：\n\(urlString)"
+        }
+    }
+
+    static var alertQROpenURLButton: String {
+        switch AppLanguage.current {
+        case .en: return "Open in Browser"
+        case .zhHans: return "打开链接"
+        }
+    }
+
+    static var alertQRCopyOnlyButton: String {
+        switch AppLanguage.current {
+        case .en: return "Keep Copied Only"
+        case .zhHans: return "仅复制，不打开"
+        }
+    }
+
     static var toolbarOCRTooltip: String {
         switch AppLanguage.current {
         case .en: return "Extract and copy text from image (O)"
@@ -301,8 +372,8 @@ enum L10n {
 
     static var clotheslinePhotoHelp: String {
         switch AppLanguage.current {
-        case .en: return "Click: select/deselect · Double-click: restore to edit · Drag: drop into apps"
-        case .zhHans: return "单击：选中/取消 · 双击：取下继续标注 · 按住可直接拖拽到聊天框"
+        case .en: return "Drag photo to drop into apps · Click: select/deselect · Double-click: restore to edit · Drag top rope: move bar"
+        case .zhHans: return "按住照片可直接拖进聊天框/应用 · 单击：勾选/取消 · 双击：取下继续标注 · 拖顶部绳子：移动晾衣绳"
         }
     }
 

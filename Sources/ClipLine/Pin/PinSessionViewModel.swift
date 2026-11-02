@@ -94,6 +94,8 @@ final class PinSessionViewModel: ObservableObject {
     @Published var isPerformingOCR: Bool = false
     @Published var isClosed: Bool = false
     var activeOCRTask: Task<Void, Never>? = nil
+    var qrURLOpenConfirmHandler: ((URL) -> Bool)? = nil
+    var qrURLOpenAction: (URL) -> Bool = { NSWorkspace.shared.open($0) }
 
     // Option to force pixelation failure in tests to verify fail-closed solid redaction block
     var forceMosaicFallbackForTesting: Bool = false
@@ -1117,6 +1119,122 @@ final class PinSessionViewModel: ObservableObject {
                 self.applyOCRResult(
                     recognized,
                     andTranslate: andTranslate,
+                    expectedChangeCount: initialChangeCount,
+                    pasteboard: ClotheslineManager.shared.pasteboardProvider()
+                )
+            }
+        }
+    }
+
+    nonisolated static func detectBarcodePayloads(in cgImage: CGImage) throws -> [String] {
+        let request = VNDetectBarcodesRequest()
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        try handler.perform([request])
+        var seen = Set<String>()
+        var results: [String] = []
+        for obs in request.results ?? [] {
+            guard let raw = obs.payloadStringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !raw.isEmpty,
+                  !seen.contains(raw) else { continue }
+            seen.insert(raw)
+            results.append(raw)
+        }
+        return results
+    }
+
+    nonisolated static func parseSafeWebURL(from payload: String) -> URL? {
+        let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              (scheme == "https" || scheme == "http"),
+              let host = url.host,
+              !host.isEmpty else {
+            return nil
+        }
+        return url
+    }
+
+    private func confirmOpenQRURL(_ url: URL) -> Bool {
+        if let customHandler = qrURLOpenConfirmHandler {
+            return customHandler(url)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = L10n.alertQROpenURLTitle
+        alert.informativeText = L10n.alertQROpenURLBody(url.absoluteString)
+        alert.addButton(withTitle: L10n.alertQROpenURLButton)
+        alert.addButton(withTitle: L10n.alertQRCopyOnlyButton)
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    func applyBarcodePayloads(_ payloads: [String], expectedChangeCount: Int, pasteboard: NSPasteboard) {
+        guard !isClosed else { return }
+        let cleaned = payloads
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !cleaned.isEmpty else {
+            showToast(L10n.toastQRNotFound)
+            return
+        }
+        guard pasteboard.changeCount == expectedChangeCount else {
+            showToast(L10n.toastOCRClipboardChangedSkipped)
+            return
+        }
+        let joined = cleaned.joined(separator: "\n")
+        pasteboard.clearContents()
+        guard pasteboard.setString(joined, forType: .string) else {
+            showToast(L10n.toastCopyFailed)
+            return
+        }
+
+        var openedURL = false
+        if let firstWebURL = cleaned.compactMap({ Self.parseSafeWebURL(from: $0) }).first {
+            if confirmOpenQRURL(firstWebURL) {
+                openedURL = qrURLOpenAction(firstWebURL)
+            }
+        }
+        showToast(L10n.toastQRCopied(count: cleaned.count, openedURL: openedURL))
+    }
+
+    func runQRCodeScan() {
+        guard !isPerformingOCR, !isClosed else { return }
+        commitPendingText()
+        guard let composite = renderCompositeImage(),
+              let tiff = composite.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let cgImage = bitmap.cgImage
+        else {
+            showToast(L10n.toastUnableToReadImage)
+            return
+        }
+
+        let initialChangeCount = ClotheslineManager.shared.pasteboardProvider().changeCount
+        isPerformingOCR = true
+        showToast(L10n.toastQRInProgress)
+
+        activeOCRTask = Task.detached { [weak self] in
+            if Task.isCancelled { return }
+            let payloads: [String]
+            do {
+                payloads = try Self.detectBarcodePayloads(in: cgImage)
+            } catch {
+                await MainActor.run { [weak self] in
+                    guard let self = self, !self.isClosed else { return }
+                    self.isPerformingOCR = false
+                    self.activeOCRTask = nil
+                    self.showToast(L10n.toastQRError)
+                }
+                return
+            }
+
+            if Task.isCancelled { return }
+            await MainActor.run { [weak self] in
+                guard let self = self, !self.isClosed, !Task.isCancelled else { return }
+                self.isPerformingOCR = false
+                self.activeOCRTask = nil
+                self.applyBarcodePayloads(
+                    payloads,
                     expectedChangeCount: initialChangeCount,
                     pasteboard: ClotheslineManager.shared.pasteboardProvider()
                 )

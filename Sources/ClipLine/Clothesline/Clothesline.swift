@@ -73,6 +73,42 @@ final class ClotheslineManager: ObservableObject {
         }
     }
 
+    func itemsForDrag(startingFrom draggedItem: ClippedPinItem) -> [ClippedPinItem] {
+        let currentItem = items.first(where: { $0.id == draggedItem.id }) ?? draggedItem
+        if currentItem.isSelected {
+            let chosen = selectedItems
+            if !chosen.isEmpty {
+                return chosen
+            }
+        }
+        return [currentItem]
+    }
+
+    func writeDragExportFiles(startingFrom draggedItem: ClippedPinItem, tempDir: String? = nil) -> [(item: ClippedPinItem, url: URL)] {
+        let dir = tempDir ?? tempDirOverride ?? ClipboardHelper.tempDir
+        ClipboardHelper.cleanupStaleTempFiles(in: dir)
+        let targetItems = itemsForDrag(startingFrom: draggedItem)
+        var results: [(item: ClippedPinItem, url: URL)] = []
+        for entry in targetItems {
+            guard let png = ClipboardHelper.pngData(from: entry.compositeImage) else { continue }
+            let tempURL = ClipboardHelper.uniqueTempFileURL(
+                prefix: "ClipLine_Drag_\(entry.id.uuidString.prefix(6))",
+                tempDir: dir
+            )
+            if (try? png.write(to: tempURL, options: .atomic)) != nil {
+                results.append((item: entry, url: tempURL))
+            }
+        }
+        if results.count != targetItems.count {
+            for entry in results {
+                try? FileManager.default.removeItem(at: entry.url)
+            }
+            showToast(L10n.toastSaveFailedCheckPermissions)
+            return []
+        }
+        return results
+    }
+
     func toggleSelection(_ id: UUID) {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
         items[idx].isSelected.toggle()
@@ -223,7 +259,10 @@ final class ClotheslineManager: ObservableObject {
         panel.isOpaque = false
         panel.hasShadow = false
         panel.hidesOnDeactivate = false
-        panel.isMovableByWindowBackground = true
+        // Do NOT set isMovableByWindowBackground = true here, because AppKit window-background dragging
+        // intercepts left mouse drags on clipped photos before NSView/SwiftUI drag-and-drop can start.
+        // Instead, dragging the top rope header moves the clothesline panel.
+        panel.isMovableByWindowBackground = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let rootView = ClotheslineBarView(manager: self)
@@ -316,6 +355,7 @@ struct ClotheslineBarView: View {
                 .offset(y: 8)
             }
             .frame(height: 28)
+            .background(ClotheslineWindowDragHandleView())
 
             HStack(alignment: .top, spacing: 14) {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -459,11 +499,11 @@ struct HangingPhotoView: View {
     let onDelete: () -> Void
 
     var body: some View {
-        VStack(spacing: -6) {
-            WoodenClothespinView(isSelected: item.isSelected)
-                .zIndex(3)
+        ZStack(alignment: .topTrailing) {
+            VStack(spacing: -6) {
+                WoodenClothespinView(isSelected: item.isSelected)
+                    .zIndex(3)
 
-            ZStack(alignment: .topTrailing) {
                 Image(nsImage: item.compositeImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -482,34 +522,140 @@ struct HangingPhotoView: View {
                     .opacity(item.isSelected ? 1.0 : 0.55)
                     .scaleEffect(item.isSelected ? 1.0 : 0.94)
                     .shadow(color: .black.opacity(0.38), radius: 5, x: 0, y: 4)
+                    .rotationEffect(.degrees(item.tiltAngle), anchor: .top)
+            }
+            .overlay(
+                ClotheslinePhotoInteractionOverlay(
+                    item: item,
+                    onSingleTap: onSingleTap,
+                    onDoubleTap: onDoubleTap
+                )
+            )
 
-                Button(action: onDelete) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 13))
-                        .foregroundColor(.black.opacity(0.65))
-                        .background(Circle().fill(Color.white))
-                }
-                .buttonStyle(.plain)
-                .offset(x: 4, y: -4)
+            Button(action: onDelete) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(.black.opacity(0.65))
+                    .background(Circle().fill(Color.white))
             }
-            .rotationEffect(.degrees(item.tiltAngle), anchor: .top)
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2, perform: onDoubleTap)
-            .onTapGesture(count: 1, perform: onSingleTap)
-            .onDrag {
-                if let png = ClipboardHelper.pngData(from: item.compositeImage) {
-                    let tempURL = ClipboardHelper.uniqueTempFileURL(
-                        prefix: "ClipLine_Drag_\(item.id.uuidString.prefix(6))",
-                        tempDir: ClotheslineManager.shared.tempDirOverride
-                    )
-                    try? png.write(to: tempURL)
-                    if let provider = NSItemProvider(contentsOf: tempURL) {
-                        return provider
-                    }
-                }
-                return NSItemProvider(object: item.compositeImage)
-            }
+            .buttonStyle(.plain)
+            .offset(x: 4, y: 12)
         }
         .help(L10n.clotheslinePhotoHelp)
+    }
+}
+
+struct ClotheslineWindowDragHandleView: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        ClotheslineRopeDragNSView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+final class ClotheslineRopeDragNSView: NSView {
+    override var mouseDownCanMoveWindow: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
+    }
+}
+
+struct ClotheslinePhotoInteractionOverlay: NSViewRepresentable {
+    let item: ClippedPinItem
+    let onSingleTap: () -> Void
+    let onDoubleTap: () -> Void
+
+    func makeNSView(context: Context) -> ClotheslinePhotoDragNSView {
+        let view = ClotheslinePhotoDragNSView()
+        view.item = item
+        view.onSingleTap = onSingleTap
+        view.onDoubleTap = onDoubleTap
+        return view
+    }
+
+    func updateNSView(_ nsView: ClotheslinePhotoDragNSView, context: Context) {
+        nsView.item = item
+        nsView.onSingleTap = onSingleTap
+        nsView.onDoubleTap = onDoubleTap
+    }
+}
+
+final class ClotheslinePhotoDragNSView: NSView, NSDraggingSource {
+    var item: ClippedPinItem?
+    var onSingleTap: (() -> Void)?
+    var onDoubleTap: (() -> Void)?
+    var singleTapDelaySeconds: TimeInterval = min(NSEvent.doubleClickInterval, 0.22)
+
+    private var mouseDownPoint: NSPoint = .zero
+    private var didStartDrag: Bool = false
+    private var pendingSingleTapWorkItem: DispatchWorkItem?
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .openHand)
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        .copy
+    }
+
+    func cancelPendingSingleTap() {
+        pendingSingleTapWorkItem?.cancel()
+        pendingSingleTapWorkItem = nil
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        mouseDownPoint = convert(event.locationInWindow, from: nil)
+        didStartDrag = false
+        if event.clickCount >= 2 {
+            cancelPendingSingleTap()
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard !didStartDrag, let item = item else { return }
+        let pt = convert(event.locationInWindow, from: nil)
+        guard hypot(pt.x - mouseDownPoint.x, pt.y - mouseDownPoint.y) >= 3.0 else { return }
+        didStartDrag = true
+        cancelPendingSingleTap()
+
+        let exported = ClotheslineManager.shared.writeDragExportFiles(startingFrom: item)
+        guard !exported.isEmpty else { return }
+
+        let baseFrame = bounds.isEmpty ? NSRect(x: 0, y: 0, width: 90, height: 64) : bounds
+        let draggingItems: [NSDraggingItem] = exported.enumerated().map { idx, entry in
+            let draggingItem = NSDraggingItem(pasteboardWriter: entry.url as NSURL)
+            let stackOffset = CGFloat(min(idx, 4)) * 5.0
+            let previewFrame = baseFrame.offsetBy(dx: stackOffset, dy: -stackOffset)
+            draggingItem.setDraggingFrame(previewFrame, contents: entry.item.compositeImage)
+            return draggingItem
+        }
+        let session = beginDraggingSession(with: draggingItems, event: event, source: self)
+        session.draggingFormation = .pile
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard !didStartDrag else {
+            didStartDrag = false
+            return
+        }
+        if event.clickCount >= 2 {
+            cancelPendingSingleTap()
+            onDoubleTap?()
+        } else if event.clickCount == 1 {
+            cancelPendingSingleTap()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                self.pendingSingleTapWorkItem = nil
+                self.onSingleTap?()
+            }
+            pendingSingleTapWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + singleTapDelaySeconds, execute: work)
+        }
     }
 }

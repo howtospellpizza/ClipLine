@@ -91,12 +91,13 @@ make uninstall
 
 ## Usage
 
-### 1. Capture, window snap, and adjust crop in place
+### 1. Capture, window snap, HEX color picker, and adjust crop in place
 
 Use the configured capture shortcut (factory default `⌃X`):
 - **Single-click window snap**: Hover over any visible window (including Stage Manager thumbnails) to preview its bounds, then **single-click** to capture that exact window in one step.
 - **Freehand drag**: Click and drag anywhere (including on the desktop) to select a custom region.
 - **Full-screen capture**: Press `Space` or `⌘A` while in the capture overlay to capture the entire screen immediately.
+- **Magnifier & HEX color picker**: Hover to inspect pixel coordinates and the `8×` magnifier loupe; press `C` during capture to copy the hovered pixel's `#RRGGBB` HEX color and exit capture, or customize crosshair style (`Full-Screen Lines`, `Corner Bracket`, `Precision Dot`) and color in **Keyboard Shortcuts** (`⌘,`).
 
 The screenshot stays pinned at the exact screen coordinates you selected. Before moving the pin or selecting a drawing tool (at `100%` zoom), drag any of the 8 handles or 4 edges to expand or shrink the crop against the original full-screen frame.
 
@@ -105,14 +106,16 @@ The screenshot stays pinned at the exact screen coordinates you selected. Before
 Press `P` (or click the clothespin icon) to park the current pin on the clothesline at the top of your screen:
 
 - **Batch copy, stitch & save**: Click multiple thumbnails on the line and click **Copy** (or **Save**) to copy or export them as separate images, or click **Stitch** to seamlessly join them vertically into a single Retina-sharp image.
-- **Drag & drop**: Drag any thumbnail directly into Slack, a browser, or Finder.
+- **Multi-photo drag & drop**: Drag a selected photo to drag **all currently selected photos** together (or drag an unselected photo to drag just that one) directly into Slack, WeChat, a browser, or Finder. Drag the top rope to reposition the clothesline bar.
 - **Unclip**: Double-click any thumbnail to return it to the canvas.
 
-### 3. Annotate, OCR, and translate
+### 3. Annotate, OCR, QR scan, and translate
 
-- **Tools**: Rectangle (hold `Shift` for 1:1 square), arrow (hold `Shift` to snap `45°` angles), freehand pen, translucent highlighter (`.multiply` blend), auto-incrementing step counter (`① ② ③…`, draggable and recolorable), text, and mosaic (`CIPixellate`), with 3 stroke sizes (`S` / `M` / `L` or `细` / `中` / `粗`) and 6 colors.
+- **Tools**: Rectangle (hold `Shift` for 1:1 square), arrow (hold `Shift` to snap `45°` angles), freehand pen, translucent highlighter (`.multiply` blend), auto-incrementing step counter (`① ② ③…`), text, and mosaic (`CIPixellate`), with 3 stroke sizes (`S` / `M` / `L` or `细` / `中` / `粗`) and 6 colors.
+- **Select, move, recolor & delete annotations**: Click any drawn rectangle, arrow, pen/highlighter stroke, counter badge, or mosaic region to reposition it, change its color/size from the toolbar, or press `Delete` / `⌫` to remove it (`⌘Z` undoes any change).
 - **Text**: Supports transparent, black pill, or white pill backgrounds. Drag anywhere inside the text box to move it, or double-click committed text to edit it in place.
 - **OCR (`O`)**: Recognizes Simplified Chinese, Traditional Chinese, and English offline via macOS `Vision` and copies the text to your clipboard.
+- **QR / Barcode Scan (`Q`)**: Decodes QR codes and barcodes offline via `VNDetectBarcodesRequest`, copies all payloads to your clipboard, and prompts before opening any detected `http`/`https` link.
 - **Translate (`T`)**: Runs OCR on the composited image and routes text to:
   1. Local translation daemon (`gloss-daemon`, or custom name via `CLIP_LINE_TRANSLATE_DAEMON`)
   2. Custom URL template (`CLIP_LINE_TRANSLATE_URL`)
@@ -143,12 +146,16 @@ The table lists factory defaults; use **Keyboard Shortcuts** or `clipline --shor
 | `⌃X` | Global | Capture region |
 | `⌘⇧X` | Global | Capture region (secondary shortcut) |
 | `⌃⌘V` | Global | Pin image from clipboard |
+| `Space` / `⌘A` | Capture overlay | Capture full screen immediately |
+| `C` | Capture overlay | Copy hovered pixel `#RRGGBB` HEX color and exit capture |
 | `↩` (`Return`) | Active pin | Copy composited image and close pin |
 | `⌘C` | Active pin | Copy composited image (keep pin open) |
 | `⌘S` | Active pin | Save as PNG |
 | `P` / `⇥` (`Tab`) | Active pin | Hang pin on the clothesline |
 | `O` | Active pin | Copy OCR text |
+| `Q` | Active pin | Scan QR code / barcode and copy payload |
 | `T` | Active pin | Run OCR and translate |
+| `⌫` / `Delete` | Active pin | Delete selected annotation |
 | `Space` | Active pin | Toggle toolbar |
 | `⌘Z` | Active pin | Undo last annotation |
 | `+` / `-` | Active pin | Zoom (`35%` – `300%`) |
