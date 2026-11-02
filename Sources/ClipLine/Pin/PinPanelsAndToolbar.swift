@@ -11,7 +11,7 @@ struct PinToolbarView: View {
     private let palette: [Color] = [.red, .orange, .yellow, .green, .blue, .white]
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             ForEach(PinAnnotation.Tool.allCases) { tool in
                 Button(action: {
                     vm.commitPendingText()
@@ -20,7 +20,7 @@ struct PinToolbarView: View {
                 }) {
                     Image(systemName: tool.icon)
                         .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 26, height: 24)
+                        .frame(width: 24, height: 24)
                         .background(vm.activeTool == tool ? Color.accentColor : Color.clear)
                         .foregroundColor(vm.activeTool == tool ? .white : .primary)
                         .clipShape(RoundedRectangle(cornerRadius: 5))
@@ -34,7 +34,7 @@ struct PinToolbarView: View {
             let activeOrSelectedTool: PinAnnotation.Tool? = selectedTool ?? vm.activeTool
             if let styleTool = activeOrSelectedTool {
                 Divider().frame(height: 16)
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     ForEach(StrokePreset.allCases) { preset in
                         Button(action: {
                             vm.strokePreset = preset
@@ -47,7 +47,7 @@ struct PinToolbarView: View {
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundColor(vm.strokePreset == preset ? .white : .primary.opacity(0.85))
                             }
-                            .padding(.horizontal, 7)
+                            .padding(.horizontal, 5)
                             .frame(height: 24)
                             .background(
                                 RoundedRectangle(cornerRadius: 5, style: .continuous)
@@ -62,7 +62,7 @@ struct PinToolbarView: View {
 
                 if styleTool != .mosaic {
                     Divider().frame(height: 16)
-                    HStack(spacing: 5) {
+                    HStack(spacing: 4) {
                         ForEach(palette, id: \.self) { c in
                             Button(action: {
                                 vm.selectedColor = c
@@ -74,18 +74,18 @@ struct PinToolbarView: View {
                                         Circle()
                                             .stroke(Color.white, lineWidth: vm.selectedColor == c ? 2.2 : 0)
                                     )
-                                    .frame(width: 20, height: 24)
+                                    .frame(width: 18, height: 24)
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(.horizontal, 2)
+                    .padding(.horizontal, 1)
                 }
 
                 if styleTool == .text {
                     Divider().frame(height: 16)
-                    HStack(spacing: 4) {
+                    HStack(spacing: 3) {
                         ForEach(TextBackgroundStyle.allCases) { bgStyle in
                             Button(action: {
                                 vm.textBackgroundStyle = bgStyle
@@ -111,7 +111,7 @@ struct PinToolbarView: View {
                                         .font(.system(size: 11, weight: .semibold))
                                         .foregroundColor(vm.textBackgroundStyle == bgStyle ? .white : .primary.opacity(0.85))
                                 }
-                                .padding(.horizontal, 6)
+                                .padding(.horizontal, 5)
                                 .frame(height: 24)
                                 .background(
                                     RoundedRectangle(cornerRadius: 5, style: .continuous)
@@ -131,7 +131,7 @@ struct PinToolbarView: View {
             Button(action: { vm.undo() }) {
                 Image(systemName: "arrow.uturn.backward")
                     .font(.system(size: 12))
-                    .frame(width: 24, height: 24)
+                    .frame(width: 22, height: 24)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -145,7 +145,7 @@ struct PinToolbarView: View {
                     Text("OCR")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 5)
                 .frame(height: 24)
                 .background(Color.primary.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 5))
@@ -161,7 +161,7 @@ struct PinToolbarView: View {
                     Text(L10n.toolbarTranslateShortLabel)
                         .font(.system(size: 11, weight: .semibold))
                 }
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 5)
                 .frame(height: 24)
                 .background(Color.accentColor.opacity(0.18))
                 .foregroundColor(.accentColor)
@@ -171,10 +171,21 @@ struct PinToolbarView: View {
             .buttonStyle(.plain)
             .help(L10n.toolbarTranslateTooltip)
 
+            Button(action: { vm.runQRCodeScan() }) {
+                Image(systemName: "qrcode.viewfinder")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 22, height: 24)
+                    .background(Color.primary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(L10n.toolbarQRTooltip)
+
             Button(action: { vm.saveToFile() }) {
                 Image(systemName: "square.and.arrow.down")
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .frame(width: 24, height: 24)
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 22, height: 24)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -189,7 +200,7 @@ struct PinToolbarView: View {
                     Text(L10n.toolbarClipLabel)
                         .font(.system(size: 11.5, weight: .semibold))
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 6)
                 .frame(height: 24)
                 .background(Color(red: 0.78, green: 0.54, blue: 0.28))
                 .foregroundColor(.white)
@@ -210,7 +221,7 @@ struct PinToolbarView: View {
                     Text(L10n.toolbarCopyLabel)
                         .font(.system(size: 11.5, weight: .semibold))
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 6)
                 .frame(height: 24)
                 .background(Color.accentColor)
                 .foregroundColor(.white)
@@ -387,11 +398,16 @@ final class PinFloatingPanel: NSPanel {
             vm.saveToFile()
             return
         }
-        if chars == "o" {
+        let unmodifiedLetter = flags.intersection([.command, .option, .control]).isEmpty
+        if unmodifiedLetter && chars == "o" {
             vm.runOCR(andTranslate: false)
             return
         }
-        if chars == "t" {
+        if unmodifiedLetter && chars == "q" {
+            vm.runQRCodeScan()
+            return
+        }
+        if unmodifiedLetter && chars == "t" {
             vm.runOCR(andTranslate: true)
             return
         }
