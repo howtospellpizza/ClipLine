@@ -75,6 +75,13 @@ final class PinSessionViewModel: ObservableObject {
             updateToolbarPanelPosition()
         }
     }
+    @Published var selectedEmoji: String = PinAnnotation.quickEmojiPalette.first ?? "👍" {
+        didSet {
+            guard !isSyncingToolbarFromSelection else { return }
+            hostingPanel?.canvasView?.applyStyleChangeToSelectionOrField(updateColor: false, updatePreset: false, updateBackground: false, updateEmoji: true)
+            updateToolbarPanelPosition()
+        }
+    }
     @Published var selectedTextAnnotationID: UUID? = nil {
         didSet {
             if oldValue != selectedTextAnnotationID {
@@ -101,6 +108,7 @@ final class PinSessionViewModel: ObservableObject {
     var forceMosaicFallbackForTesting: Bool = false
     @Published var pendingTextNormalizedPos: CGPoint? = nil
     @Published var pendingTextString: String = ""
+    var pendingTextCustomFontSize: CGFloat? = nil
     var editingExistingTextAnnotationID: UUID? = nil
     var editingOriginalAnnotationSnapshot: PinAnnotation? = nil
 
@@ -403,12 +411,14 @@ final class PinSessionViewModel: ObservableObject {
         isSyncingToolbarFromSelection = true
         defer { isSyncingToolbarFromSelection = false }
 
-        if item.tool != .mosaic {
+        if item.tool != .mosaic && item.tool != .emoji {
             selectedColor = Self.matchingToolbarPaletteColor(for: item.color)
         }
         strokePreset = Self.matchingStrokePreset(for: item)
         if item.tool == .text {
             textBackgroundStyle = item.textBackgroundStyle
+        } else if item.tool == .emoji && !item.text.isEmpty {
+            selectedEmoji = item.text
         }
     }
 
@@ -450,9 +460,23 @@ final class PinSessionViewModel: ObservableObject {
         switch tool {
         case .counter: return preset.counterBadgeDiameter
         case .text: return preset.textFontSize
+        case .emoji: return preset.emojiFontSize
         case .highlighter: return preset.highlighterBrushWidth
         case .mosaic: return preset.mosaicBrushWidth
         case .rect, .arrow, .pen: return preset.strokeLineWidth
+        }
+    }
+
+    static func clampedAnnotationLineWidth(_ width: CGFloat, for tool: PinAnnotation.Tool) -> CGFloat {
+        switch tool {
+        case .text:
+            return max(10.0, min(140.0, width))
+        case .emoji:
+            return max(14.0, min(180.0, width))
+        case .counter:
+            return max(16.0, min(140.0, width))
+        default:
+            return max(1.0, width)
         }
     }
 
@@ -536,6 +560,7 @@ final class PinSessionViewModel: ObservableObject {
         editingOriginalAnnotationSnapshot = nil
         pendingTextNormalizedPos = nil
         pendingTextString = ""
+        pendingTextCustomFontSize = nil
         if let tf = hostingPanel?.canvasView?.textField {
             tf.delegate = nil
             hostingPanel?.canvasView?.clearTextFieldReference()
@@ -565,14 +590,16 @@ final class PinSessionViewModel: ObservableObject {
         guard let pos = pendingTextNormalizedPos else {
             editingExistingTextAnnotationID = nil
             editingOriginalAnnotationSnapshot = nil
+            pendingTextCustomFontSize = nil
             return
         }
+        let resolvedFontSize = pendingTextCustomFontSize ?? strokePreset.textFontSize
         let trimmed = pendingTextString.trimmingCharacters(in: .whitespacesAndNewlines)
         if let editID = editingExistingTextAnnotationID,
            let idx = annotations.firstIndex(where: { $0.id == editID && $0.tool == .text }) {
             let current = annotations[idx]
             let nextColor = NSColor(selectedColor)
-            let nextWidth = strokePreset.textFontSize
+            let nextWidth = resolvedFontSize
             let nextBg = textBackgroundStyle
             if trimmed.isEmpty {
                 recordUndoSnapshot()
@@ -601,7 +628,7 @@ final class PinSessionViewModel: ObservableObject {
             let newItem = PinAnnotation(
                 tool: .text,
                 color: NSColor(selectedColor),
-                lineWidth: strokePreset.textFontSize,
+                lineWidth: resolvedFontSize,
                 points: [pos],
                 text: trimmed,
                 textBackgroundStyle: textBackgroundStyle
@@ -613,6 +640,7 @@ final class PinSessionViewModel: ObservableObject {
         editingOriginalAnnotationSnapshot = nil
         pendingTextNormalizedPos = nil
         pendingTextString = ""
+        pendingTextCustomFontSize = nil
         if let cv = hostingPanel?.canvasView {
             cv.window?.invalidateCursorRects(for: cv)
             cv.needsDisplay = true
@@ -819,7 +847,7 @@ final class PinSessionViewModel: ObservableObject {
 
         case .text:
             let pos = pts[0]
-            let fontSize = max(12.0, item.lineWidth) * scaleMultiplier
+            let fontSize = max(10.0, item.lineWidth) * scaleMultiplier
             let font = NSFont.systemFont(ofSize: fontSize, weight: .bold)
             var attrs: [NSAttributedString.Key: Any] = [
                 .font: font,
@@ -858,6 +886,29 @@ final class PinSessionViewModel: ObservableObject {
                 ctx.restoreGState()
             }
             (item.text as NSString).draw(at: CGPoint(x: 0, y: -textSize.height), withAttributes: attrs)
+            ctx.restoreGState()
+
+        case .emoji:
+            let center = pts[0]
+            let fontSize = max(14.0, item.lineWidth) * scaleMultiplier
+            let font = NSFont.systemFont(ofSize: fontSize)
+            let label = item.text.isEmpty ? "👍" : item.text
+            let emojiShadow = NSShadow()
+            emojiShadow.shadowColor = NSColor.black.withAlphaComponent(0.28)
+            emojiShadow.shadowBlurRadius = 2.5 * scaleMultiplier
+            emojiShadow.shadowOffset = NSSize(width: 0, height: -1)
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .shadow: emojiShadow
+            ]
+            let textSize = (label as NSString).size(withAttributes: attrs)
+            ctx.saveGState()
+            ctx.translateBy(x: center.x, y: center.y)
+            ctx.scaleBy(x: 1.0, y: -1.0)
+            (label as NSString).draw(
+                at: CGPoint(x: -textSize.width / 2.0, y: -textSize.height / 2.0),
+                withAttributes: attrs
+            )
             ctx.restoreGState()
         }
         ctx.restoreGState()

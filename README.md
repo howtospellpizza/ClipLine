@@ -111,9 +111,9 @@ Press `P` (or click the clothespin icon) to park the current pin on the clothesl
 
 ### 3. Annotate, OCR, QR scan, and translate
 
-- **Tools**: Rectangle (hold `Shift` for 1:1 square), arrow (hold `Shift` to snap `45°` angles), freehand pen, translucent highlighter (`.multiply` blend), auto-incrementing step counter (`① ② ③…`), text, and mosaic (`CIPixellate`), with 3 stroke sizes (`S` / `M` / `L` or `细` / `中` / `粗`) and 6 colors.
-- **Select, move, recolor & delete annotations**: Click any drawn rectangle, arrow, pen/highlighter stroke, counter badge, or mosaic region to reposition it, change its color/size from the toolbar, or press `Delete` / `⌫` to remove it (`⌘Z` undoes any change).
-- **Text**: Supports transparent, black pill, or white pill backgrounds. Drag anywhere inside the text box to move it, or double-click committed text to edit it in place.
+- **Tools**: Rectangle (hold `Shift` for 1:1 square), arrow (hold `Shift` to snap `45°` angles), freehand pen, translucent highlighter (`.multiply` blend), auto-incrementing step counter (`① ② ③…`), text, emoji sticker (quick emoji bar + macOS Character Palette `⌃⌘Space`), and mosaic (`CIPixellate`), with 3 stroke sizes (`S` / `M` / `L` or `细` / `中` / `粗`) and 6 colors.
+- **Select, move, resize, recolor & delete annotations**: Click any drawn rectangle, arrow, pen/highlighter stroke, counter badge, text, emoji sticker, or mosaic region to reposition it, change its color/size from the toolbar, drag any of the 4 corner handles on a selected text, emoji, or counter annotation to smoothly scale its size, or press `Delete` / `⌫` to remove it (`⌘Z` undoes any change).
+- **Text & Emoji Stickers**: Text supports transparent, black pill, or white pill backgrounds; drag anywhere inside the text box to move it, double-click committed text to edit it in place, or drag its 4 corner handles after committing to resize the font smoothly while keeping `S` / `M` / `L` presets available. Emoji stickers can be placed from the toolbar's 10 quick-pick emojis or any character from the macOS Character Palette (`…`).
 - **OCR (`O`)**: Recognizes Simplified Chinese, Traditional Chinese, and English offline via macOS `Vision` and copies the text to your clipboard.
 - **QR / Barcode Scan (`Q`)**: Decodes QR codes and barcodes offline via `VNDetectBarcodesRequest`, copies all payloads to your clipboard, and prompts before opening any detected `http`/`https` link.
 - **Translate (`T`)**: Runs OCR on the composited image and routes text to:

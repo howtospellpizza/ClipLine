@@ -26,10 +26,20 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
     private var textDragStartNormalizedPoints: [CGPoint] = []
     private var textDragDidMove: Bool = false
 
+    private var resizingAnnotationID: UUID?
+    private var activeAnnotationCornerHandle: PinSessionViewModel.ResizeHandle?
+    private var annotationResizeStartLineWidth: CGFloat = 0
+    private var annotationResizeAnchorViewPoint: NSPoint = .zero
+    private var annotationResizeStartDistance: CGFloat = 1.0
+    private var annotationResizeDidChange: Bool = false
+
     func cancelActiveAnnotationDrag() {
         draggingTextAnnotationID = nil
         textDragStartNormalizedPoints = []
         textDragDidMove = false
+        resizingAnnotationID = nil
+        activeAnnotationCornerHandle = nil
+        annotationResizeDidChange = false
     }
 
     private var isDraggingPendingField: Bool = false
@@ -60,7 +70,8 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
 
     func syncActiveTextStyle() {
         let nsColor = NSColor(vm.selectedColor)
-        let font = NSFont.systemFont(ofSize: vm.strokePreset.textFontSize * vm.scale, weight: .bold)
+        let activeFontSize = (vm.pendingTextCustomFontSize ?? vm.strokePreset.textFontSize) * vm.scale
+        let font = NSFont.systemFont(ofSize: activeFontSize, weight: .bold)
         if let tf = textField {
             tf.textColor = nsColor
             tf.font = font
@@ -87,8 +98,11 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
-    func applyStyleChangeToSelectionOrField(updateColor: Bool, updatePreset: Bool, updateBackground: Bool) {
+    func applyStyleChangeToSelectionOrField(updateColor: Bool, updatePreset: Bool, updateBackground: Bool, updateEmoji: Bool = false) {
         if textField != nil {
+            if updatePreset {
+                vm.pendingTextCustomFontSize = nil
+            }
             syncActiveTextStyle()
             return
         }
@@ -96,13 +110,17 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
            let idx = vm.annotations.firstIndex(where: { $0.id == selID }) {
             let current = vm.annotations[idx]
             let tool = current.tool
-            let nextColor = (updateColor && tool != .mosaic) ? NSColor(vm.selectedColor) : current.color
+            let nextColor = (updateColor && tool != .mosaic && tool != .emoji) ? NSColor(vm.selectedColor) : current.color
             let nextWidth: CGFloat = {
                 guard updatePreset else { return current.lineWidth }
                 return PinSessionViewModel.presetLineWidth(vm.strokePreset, for: tool)
             }()
             let nextBg: TextBackgroundStyle = (updateBackground && tool == .text) ? vm.textBackgroundStyle : current.textBackgroundStyle
-            let didChange = nextColor != current.color || abs(nextWidth - current.lineWidth) > 0.001 || nextBg != current.textBackgroundStyle
+            let nextText: String = (updateEmoji && tool == .emoji) ? vm.selectedEmoji : current.text
+            let didChange = nextColor != current.color ||
+                abs(nextWidth - current.lineWidth) > 0.001 ||
+                nextBg != current.textBackgroundStyle ||
+                nextText != current.text
             guard didChange else {
                 needsDisplay = true
                 return
@@ -111,11 +129,42 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             vm.annotations[idx].color = nextColor
             vm.annotations[idx].lineWidth = nextWidth
             vm.annotations[idx].textBackgroundStyle = nextBg
+            vm.annotations[idx].text = nextText
             window?.invalidateCursorRects(for: self)
             needsDisplay = true
         } else {
             needsDisplay = true
         }
+    }
+
+    func openSystemEmojiPicker() {
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+        if textField == nil {
+            window?.makeFirstResponder(self)
+        }
+        NSApp.orderFrontCharacterPalette(self)
+    }
+
+    override func insertText(_ insertString: Any) {
+        let str: String?
+        if let s = insertString as? String {
+            str = s
+        } else if let attr = insertString as? NSAttributedString {
+            str = attr.string
+        } else {
+            str = nil
+        }
+        guard let raw = str?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let firstChar = raw.first else {
+            return
+        }
+        let picked = String(firstChar)
+        if vm.activeTool != .emoji,
+           !(vm.selectedTextAnnotationID != nil && vm.annotations.first(where: { $0.id == vm.selectedTextAnnotationID })?.tool == .emoji) {
+            vm.activeTool = .emoji
+        }
+        vm.selectedEmoji = picked
     }
 
     func pendingFieldHitRect() -> NSRect? {
@@ -126,7 +175,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
     func updateInlineTextFieldPosition() {
         guard let tf = textField, let normPt = vm.pendingTextNormalizedPos else { return }
         let imgRect = imageRectInView
-        let fontSize = vm.strokePreset.textFontSize * vm.scale
+        let fontSize = (vm.pendingTextCustomFontSize ?? vm.strokePreset.textFontSize) * vm.scale
         let font = NSFont.systemFont(ofSize: fontSize, weight: .bold)
         let sampleStr = vm.pendingTextString.isEmpty ? L10n.inlineTextPlaceholder : vm.pendingTextString
         let measured = (sampleStr as NSString).size(withAttributes: [.font: font])
@@ -157,14 +206,26 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         guard let normPt = item.points.first else { return nil }
         let imgRect = imageRectInView
         if item.tool == .counter {
-            let diameter = max(18.0, item.lineWidth) * vm.scale
+            let diameter = max(16.0, item.lineWidth) * vm.scale
             let radius = diameter / 2.0 + 4.0
             let vx = imgRect.minX + normPt.x * imgRect.width
             let vy = imgRect.maxY - normPt.y * imgRect.height
             return NSRect(x: vx - radius, y: vy - radius, width: radius * 2.0, height: radius * 2.0)
         }
+        if item.tool == .emoji {
+            let fontSize = max(14.0, item.lineWidth) * vm.scale
+            let label = item.text.isEmpty ? "👍" : item.text
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: fontSize)
+            ]
+            let sz = (label as NSString).size(withAttributes: attrs)
+            let side = max(24.0, max(sz.width, sz.height) + 8.0)
+            let vx = imgRect.minX + normPt.x * imgRect.width
+            let vy = imgRect.maxY - normPt.y * imgRect.height
+            return NSRect(x: vx - side / 2.0, y: vy - side / 2.0, width: side, height: side)
+        }
         if item.tool == .text {
-            let fontSize = max(12.0, item.lineWidth) * vm.scale
+            let fontSize = max(10.0, item.lineWidth) * vm.scale
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: fontSize, weight: .bold)
             ]
@@ -199,6 +260,39 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         return NSRect(x: minX - pad, y: minY - pad, width: max(12, maxX - minX + pad * 2), height: max(12, maxY - minY + pad * 2))
     }
 
+    func selectedAnnotationCornerHandlesInView() -> [(PinSessionViewModel.ResizeHandle, NSPoint)] {
+        guard textField == nil,
+              let selID = vm.selectedTextAnnotationID,
+              let selItem = vm.annotations.first(where: { $0.id == selID }),
+              selItem.tool.supportsCornerResize,
+              let hitRect = textAnnotationHitRectInView(selItem) else {
+            return []
+        }
+        let r = hitRect.insetBy(dx: 2, dy: 2)
+        return [
+            (.topLeft, NSPoint(x: r.minX, y: r.maxY)),
+            (.topRight, NSPoint(x: r.maxX, y: r.maxY)),
+            (.bottomLeft, NSPoint(x: r.minX, y: r.minY)),
+            (.bottomRight, NSPoint(x: r.maxX, y: r.minY))
+        ]
+    }
+
+    func hitTestSelectedAnnotationCornerHandle(viewPoint: NSPoint) -> PinSessionViewModel.ResizeHandle? {
+        let handles = selectedAnnotationCornerHandlesInView()
+        guard !handles.isEmpty else { return nil }
+        let hitRadius: CGFloat = 9.0
+        var bestHandle: PinSessionViewModel.ResizeHandle? = nil
+        var bestDist: CGFloat = .greatestFiniteMagnitude
+        for (handle, pt) in handles {
+            let d = hypot(viewPoint.x - pt.x, viewPoint.y - pt.y)
+            if d <= hitRadius && d < bestDist {
+                bestDist = d
+                bestHandle = handle
+            }
+        }
+        return bestHandle
+    }
+
     private func distanceFromPoint(_ p: NSPoint, toSegmentStart a: NSPoint, end b: NSPoint) -> CGFloat {
         let dx = b.x - a.x
         let dy = b.y - a.y
@@ -220,7 +314,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
     }
 
     private func hitTestAnnotationItem(_ item: PinAnnotation, viewPoint: NSPoint) -> Bool {
-        if item.tool == .text || item.tool == .counter {
+        if item.tool == .text || item.tool == .counter || item.tool == .emoji {
             return textAnnotationHitRectInView(item)?.contains(viewPoint) == true
         }
         guard item.points.count >= 2 else { return false }
@@ -278,7 +372,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
                 }
             }
             return false
-        case .text, .counter:
+        case .text, .counter, .emoji:
             return false
         }
     }
@@ -375,6 +469,10 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         if let fieldRect = pendingFieldHitRect() {
             addCursorRect(fieldRect, cursor: NSCursor.openHand)
         }
+        for (handle, pt) in selectedAnnotationCornerHandlesInView() {
+            let hRect = NSRect(x: pt.x - 9, y: pt.y - 9, width: 18, height: 18)
+            addCursorRect(hRect, cursor: handle.cursor)
+        }
         guard vm.canAdjustCrop, vm.activeTool == nil else { return }
 
         let r = imageRectInView
@@ -396,12 +494,20 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             handle.cursor.set()
             return
         }
+        if let handle = activeAnnotationCornerHandle {
+            handle.cursor.set()
+            return
+        }
         if draggingTextAnnotationID != nil || isDraggingPendingField {
             NSCursor.closedHand.set()
             return
         }
         if let fieldRect = pendingFieldHitRect(), fieldRect.contains(pt) {
             NSCursor.openHand.set()
+            return
+        }
+        if let cornerHandle = hitTestSelectedAnnotationCornerHandle(viewPoint: pt) {
+            cornerHandle.cursor.set()
             return
         }
         if hitTestTextAnnotationIndex(viewPoint: pt) != nil {
@@ -451,6 +557,29 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             return
         }
 
+        // 0b. Check 4 corner resize handles of a selected committed annotation (.text, .emoji, .counter)
+        if let cornerHandle = hitTestSelectedAnnotationCornerHandle(viewPoint: pt),
+           let selID = vm.selectedTextAnnotationID,
+           let selItem = vm.annotations.first(where: { $0.id == selID }),
+           let hitRect = textAnnotationHitRectInView(selItem) {
+            let insetRect = hitRect.insetBy(dx: 2, dy: 2)
+            let anchorPt: NSPoint
+            if selItem.tool == .text {
+                anchorPt = NSPoint(x: insetRect.minX, y: insetRect.maxY)
+            } else {
+                anchorPt = NSPoint(x: insetRect.midX, y: insetRect.midY)
+            }
+            let handlePt = selectedAnnotationCornerHandlesInView().first(where: { $0.0 == cornerHandle })?.1 ?? pt
+            resizingAnnotationID = selItem.id
+            activeAnnotationCornerHandle = cornerHandle
+            annotationResizeStartLineWidth = selItem.lineWidth
+            annotationResizeAnchorViewPoint = anchorPt
+            annotationResizeStartDistance = max(12.0, hypot(handlePt.x - anchorPt.x, handlePt.y - anchorPt.y))
+            annotationResizeDidChange = false
+            cornerHandle.cursor.set()
+            return
+        }
+
         // 1. Check 8 resize handles & 4 borders first!
         if let handle = hitTestResizeHandle(viewPoint: pt),
            let cropRect = vm.cropScreenRect {
@@ -474,6 +603,9 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             }
             let hitItem = vm.annotations[resolvedHitIdx]
             vm.selectedTextAnnotationID = hitItem.id
+            if hitItem.tool == .emoji && !hitItem.text.isEmpty {
+                vm.selectedEmoji = hitItem.text
+            }
             if hitItem.tool == .text && event.clickCount == 2 {
                 // Double-click existing text annotation to re-edit in place (non-destructively until committed)
                 vm.editingExistingTextAnnotationID = hitItem.id
@@ -483,6 +615,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
                 if let matchedPreset = StrokePreset.allCases.min(by: { abs($0.textFontSize - hitItem.lineWidth) < abs($1.textFontSize - hitItem.lineWidth) }) {
                     vm.strokePreset = matchedPreset
                 }
+                vm.pendingTextCustomFontSize = hitItem.lineWidth
                 vm.textBackgroundStyle = hitItem.textBackgroundStyle
                 let normPt = hitItem.points.first ?? CGPoint(x: 0.5, y: 0.5)
                 showInlineTextField(atNormalized: normPt, in: imgRect, initialText: hitItem.text)
@@ -493,6 +626,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             textDragStartMouseView = pt
             textDragStartNormalizedPoints = hitItem.points
             textDragDidMove = false
+            window?.invalidateCursorRects(for: self)
             NSCursor.closedHand.set()
             needsDisplay = true
             return
@@ -500,7 +634,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
 
         vm.selectedTextAnnotationID = nil
 
-        // 3. If an annotation tool is active, start drawing or placing text / step counter
+        // 3. If an annotation tool is active, start drawing or placing text / step counter / emoji
         if let tool = vm.activeTool {
             let nx = max(0, min(1, (pt.x - imgRect.minX) / imgRect.width))
             // Normalized Y is top-down (0 = top, 1 = bottom)
@@ -513,6 +647,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
                     vm.commitPendingText()
                     return
                 }
+                vm.pendingTextCustomFontSize = nil
                 showInlineTextField(atNormalized: normPt, in: imgRect)
                 return
             }
@@ -531,6 +666,28 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
                 vm.annotations.append(newBadge)
                 vm.selectedTextAnnotationID = newBadge.id
                 draggingTextAnnotationID = newBadge.id
+                textDragStartMouseView = pt
+                textDragStartNormalizedPoints = [normPt]
+                textDragDidMove = true
+                window?.invalidateCursorRects(for: self)
+                needsDisplay = true
+                return
+            }
+
+            if tool == .emoji {
+                vm.commitPendingText()
+                vm.recordUndoSnapshot()
+                let emojiStr = vm.selectedEmoji.isEmpty ? "👍" : vm.selectedEmoji
+                let newSticker = PinAnnotation(
+                    tool: .emoji,
+                    color: NSColor(vm.selectedColor),
+                    lineWidth: vm.strokePreset.emojiFontSize,
+                    points: [normPt],
+                    text: emojiStr
+                )
+                vm.annotations.append(newSticker)
+                vm.selectedTextAnnotationID = newSticker.id
+                draggingTextAnnotationID = newSticker.id
                 textDragStartMouseView = pt
                 textDragStartNormalizedPoints = [normPt]
                 textDragDidMove = true
@@ -578,6 +735,29 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             return
         }
 
+        if let resizeID = resizingAnnotationID,
+           let cornerHandle = activeAnnotationCornerHandle {
+            guard let idx = vm.annotations.firstIndex(where: { $0.id == resizeID }) else {
+                cancelActiveAnnotationDrag()
+                return
+            }
+            let pt = convert(event.locationInWindow, from: nil)
+            let currentDist = max(6.0, hypot(pt.x - annotationResizeAnchorViewPoint.x, pt.y - annotationResizeAnchorViewPoint.y))
+            let ratio = currentDist / max(12.0, annotationResizeStartDistance)
+            let tool = vm.annotations[idx].tool
+            let nextWidth = PinSessionViewModel.clampedAnnotationLineWidth(annotationResizeStartLineWidth * ratio, for: tool)
+            if abs(nextWidth - vm.annotations[idx].lineWidth) > 0.05 {
+                if !annotationResizeDidChange {
+                    vm.recordUndoSnapshot()
+                    annotationResizeDidChange = true
+                }
+                vm.annotations[idx].lineWidth = nextWidth
+                needsDisplay = true
+            }
+            cornerHandle.cursor.set()
+            return
+        }
+
         if let dragID = draggingTextAnnotationID {
             guard let textIdx = vm.annotations.firstIndex(where: { $0.id == dragID }),
                   !textDragStartNormalizedPoints.isEmpty else {
@@ -613,7 +793,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             return
         }
 
-        if let tool = vm.activeTool, tool != .text, tool != .counter, !vm.currentDragPoints.isEmpty {
+        if let tool = vm.activeTool, tool != .text, tool != .counter, tool != .emoji, !vm.currentDragPoints.isEmpty {
             let pt = convert(event.locationInWindow, from: nil)
             let imgRect = imageRectInView
             let nx = max(0, min(1, (pt.x - imgRect.minX) / imgRect.width))
@@ -670,6 +850,13 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             return
         }
 
+        if resizingAnnotationID != nil {
+            cancelActiveAnnotationDrag()
+            window?.invalidateCursorRects(for: self)
+            updateCursorForViewPoint(pt)
+            return
+        }
+
         if draggingTextAnnotationID != nil {
             cancelActiveAnnotationDrag()
             window?.invalidateCursorRects(for: self)
@@ -677,7 +864,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             return
         }
 
-        if let tool = vm.activeTool, tool != .text, tool != .counter, !vm.currentDragPoints.isEmpty {
+        if let tool = vm.activeTool, tool != .text, tool != .counter, tool != .emoji, !vm.currentDragPoints.isEmpty {
             if vm.currentDragPoints.count >= 2 {
                 vm.recordUndoSnapshot()
                 let created = PinAnnotation(
@@ -707,7 +894,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         vm.pendingTextNormalizedPos = normPt
         vm.pendingTextString = initialText
 
-        let fontSize = vm.strokePreset.textFontSize * vm.scale
+        let fontSize = (vm.pendingTextCustomFontSize ?? vm.strokePreset.textFontSize) * vm.scale
         let font = NSFont.systemFont(ofSize: fontSize, weight: .bold)
         let sampleStr = initialText.isEmpty ? L10n.inlineTextPlaceholder : initialText
         let measured = (sampleStr as NSString).size(withAttributes: [.font: font])
@@ -858,7 +1045,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             ctx.setLineWidth(1.2)
             ctx.setLineDash(phase: 0, lengths: [4, 3])
             let dashPath: CGPath
-            if selItem.tool == .counter {
+            if selItem.tool == .counter && !selItem.tool.supportsCornerResize {
                 dashPath = CGPath(ellipseIn: hitRect.insetBy(dx: 1.5, dy: 1.5), transform: nil)
             } else {
                 dashPath = CGPath(roundedRect: hitRect.insetBy(dx: 2, dy: 2), cornerWidth: 5, cornerHeight: 5, transform: nil)
@@ -866,6 +1053,21 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             ctx.addPath(dashPath)
             ctx.strokePath()
             ctx.restoreGState()
+
+            for (_, pt) in selectedAnnotationCornerHandlesInView() {
+                let dotRect = CGRect(x: pt.x - 4.0, y: pt.y - 4.0, width: 8.0, height: 8.0)
+                ctx.saveGState()
+                ctx.setShadow(offset: CGSize(width: 0, height: -1), blur: 2.0, color: NSColor.black.withAlphaComponent(0.35).cgColor)
+                ctx.setFillColor(NSColor.white.cgColor)
+                ctx.fillEllipse(in: dotRect)
+                ctx.restoreGState()
+
+                ctx.saveGState()
+                ctx.setStrokeColor(accent.cgColor)
+                ctx.setLineWidth(1.8)
+                ctx.strokeEllipse(in: dotRect)
+                ctx.restoreGState()
+            }
         }
 
         // 3. Draw crisp 4-sided accent border around imageRectInView (never clipped!)

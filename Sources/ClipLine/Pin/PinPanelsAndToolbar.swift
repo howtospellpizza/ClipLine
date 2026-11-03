@@ -60,7 +60,7 @@ struct PinToolbarView: View {
                     }
                 }
 
-                if styleTool != .mosaic {
+                if styleTool != .mosaic && styleTool != .emoji {
                     Divider().frame(height: 16)
                     HStack(spacing: 4) {
                         ForEach(palette, id: \.self) { c in
@@ -81,6 +81,54 @@ struct PinToolbarView: View {
                         }
                     }
                     .padding(.horizontal, 1)
+                }
+
+                if styleTool == .emoji {
+                    Divider().frame(height: 16)
+                    HStack(spacing: 2) {
+                        ForEach(PinAnnotation.quickEmojiPalette, id: \.self) { emoji in
+                            Button(action: {
+                                vm.selectedEmoji = emoji
+                            }) {
+                                Text(emoji)
+                                    .font(.system(size: 13.5))
+                                    .frame(width: 22, height: 24)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                            .fill(vm.selectedEmoji == emoji ? Color.accentColor : Color.primary.opacity(0.06))
+                                    )
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        if !PinAnnotation.quickEmojiPalette.contains(vm.selectedEmoji) {
+                            Button(action: {}) {
+                                Text(vm.selectedEmoji)
+                                    .font(.system(size: 13.5))
+                                    .frame(width: 22, height: 24)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                            .fill(Color.accentColor)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Button(action: {
+                            vm.hostingPanel?.canvasView?.openSystemEmojiPicker()
+                        }) {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.primary.opacity(0.85))
+                                .frame(width: 22, height: 24)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                        .fill(Color.primary.opacity(0.08))
+                                )
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(L10n.emojiMorePickerTooltip)
+                    }
                 }
 
                 if styleTool == .text {
@@ -288,6 +336,10 @@ final class PinToolbarPanel: NSPanel {
         onEscape?()
     }
 
+    override func insertText(_ insertString: Any) {
+        viewModel?.hostingPanel?.canvasView?.insertText(insertString)
+    }
+
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 {
             if let vm = viewModel, vm.pendingTextNormalizedPos != nil {
@@ -340,6 +392,10 @@ final class PinFloatingPanel: NSPanel {
               let onOpenSettings else { return false }
         onOpenSettings()
         return true
+    }
+
+    override func insertText(_ insertString: Any) {
+        canvasView?.insertText(insertString)
     }
 
     override func keyDown(with event: NSEvent) {
