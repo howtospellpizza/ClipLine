@@ -1869,12 +1869,24 @@ func runAllTests() -> Int32 {
         }
 
         // Verify 4-corner drag resizing on committed .emoji, .counter, and .text annotations (with custom size preservation on double-click re-edit)
-        if let emojiID = vm.annotations.last(where: { $0.tool == .emoji })?.id {
-            vm.selectedTextAnnotationID = emojiID
+        if let emojiID = vm.annotations.last(where: { $0.tool == .emoji })?.id,
+           let emojiItem = vm.annotations.first(where: { $0.id == emojiID }),
+           let emojiHitRect = canvas.textAnnotationHitRectInView(emojiItem),
+           let reselectDown = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: NSPoint(x: emojiHitRect.midX, y: emojiHitRect.midY), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 51, clickCount: 1, pressure: 1.0
+           ),
+           let reselectUp = NSEvent.mouseEvent(
+            with: .leftMouseUp, location: NSPoint(x: emojiHitRect.midX, y: emojiHitRect.midY), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 51, clickCount: 1, pressure: 1.0
+           ) {
+            // Clicking an earlier emoji sticker on canvas re-selects it (preserving selection for corner resize)
+            canvas.mouseDown(with: reselectDown)
+            canvas.mouseUp(with: reselectUp)
             let handles = canvas.selectedAnnotationCornerHandlesInView()
             t.check(
-                handles.count == 4,
-                "Selected .emoji annotation exposes 4 corner resize handles"
+                vm.selectedTextAnnotationID == emojiID && handles.count == 4,
+                "Clicking an existing .emoji annotation re-selects it and exposes 4 corner resize handles"
             )
             if let brHandlePt = handles.first(where: { $0.0 == .bottomRight })?.1,
                let rDown = NSEvent.mouseEvent(

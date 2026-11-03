@@ -667,9 +667,6 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             }
             let hitItem = vm.annotations[resolvedHitIdx]
             vm.selectedTextAnnotationID = hitItem.id
-            if hitItem.tool == .emoji && !hitItem.text.isEmpty {
-                vm.selectedEmoji = hitItem.text
-            }
             if hitItem.tool == .text && event.clickCount == 2 {
                 // Double-click existing text annotation to re-edit in place (non-destructively until committed)
                 vm.editingExistingTextAnnotationID = hitItem.id
