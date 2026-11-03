@@ -1841,7 +1841,7 @@ func runAllTests() -> Int32 {
             t.check(
                 placedEmoji?.tool == .emoji &&
                 placedEmoji?.text == "🔥" &&
-                placedEmoji?.lineWidth == vm.strokePreset.emojiFontSize &&
+                placedEmoji?.lineWidth == PinAnnotation.defaultEmojiFontSize &&
                 vm.selectedTextAnnotationID == placedEmoji?.id,
                 "Clicking canvas with .emoji tool places emoji sticker and auto-selects it"
             )
@@ -1852,8 +1852,13 @@ func runAllTests() -> Int32 {
                 updatedEmoji?.text == "🚀",
                 "Changing selectedEmoji while an .emoji annotation is selected updates its emoji character"
             )
-            // System Character Palette insertText(_:) updates selectedEmoji (and selected emoji annotation)
-            canvas.insertText("🦄")
+            // System Character Palette insertText(_:) or hidden emojiCaptureInputView text insertion updates selectedEmoji (and selected emoji annotation)
+            canvas.openSystemEmojiPicker()
+            if let responderView = pinPanel.firstResponder as? NSTextView {
+                responderView.insertText("🦄", replacementRange: NSRange(location: 0, length: 0))
+            } else {
+                canvas.insertText("🦄")
+            }
             t.check(
                 vm.selectedEmoji == "🦄" && vm.annotations.last?.text == "🦄",
                 "insertText from macOS Character Palette updates selectedEmoji and the selected emoji sticker"

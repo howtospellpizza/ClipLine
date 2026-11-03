@@ -414,7 +414,9 @@ final class PinSessionViewModel: ObservableObject {
         if item.tool != .mosaic && item.tool != .emoji {
             selectedColor = Self.matchingToolbarPaletteColor(for: item.color)
         }
-        strokePreset = Self.matchingStrokePreset(for: item)
+        if item.tool != .emoji {
+            strokePreset = Self.matchingStrokePreset(for: item)
+        }
         if item.tool == .text {
             textBackgroundStyle = item.textBackgroundStyle
         } else if item.tool == .emoji && !item.text.isEmpty {

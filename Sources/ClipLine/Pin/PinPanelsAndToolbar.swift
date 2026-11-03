@@ -33,30 +33,32 @@ struct PinToolbarView: View {
             let selectedTool: PinAnnotation.Tool? = vm.annotations.first(where: { $0.id == vm.selectedTextAnnotationID })?.tool
             let activeOrSelectedTool: PinAnnotation.Tool? = selectedTool ?? vm.activeTool
             if let styleTool = activeOrSelectedTool {
-                Divider().frame(height: 16)
-                HStack(spacing: 3) {
-                    ForEach(StrokePreset.allCases) { preset in
-                        Button(action: {
-                            vm.strokePreset = preset
-                        }) {
-                            HStack(spacing: 3) {
-                                Circle()
-                                    .fill(vm.strokePreset == preset ? Color.white : Color.primary.opacity(0.75))
-                                    .frame(width: preset.dotDiameter, height: preset.dotDiameter)
-                                Text(preset.localizedShortLabel)
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(vm.strokePreset == preset ? .white : .primary.opacity(0.85))
+                if styleTool != .emoji {
+                    Divider().frame(height: 16)
+                    HStack(spacing: 3) {
+                        ForEach(StrokePreset.allCases) { preset in
+                            Button(action: {
+                                vm.strokePreset = preset
+                            }) {
+                                HStack(spacing: 3) {
+                                    Circle()
+                                        .fill(vm.strokePreset == preset ? Color.white : Color.primary.opacity(0.75))
+                                        .frame(width: preset.dotDiameter, height: preset.dotDiameter)
+                                    Text(preset.localizedShortLabel)
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(vm.strokePreset == preset ? .white : .primary.opacity(0.85))
+                                }
+                                .padding(.horizontal, 5)
+                                .frame(height: 24)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                        .fill(vm.strokePreset == preset ? Color.accentColor : Color.primary.opacity(0.08))
+                                )
+                                .contentShape(Rectangle())
                             }
-                            .padding(.horizontal, 5)
-                            .frame(height: 24)
-                            .background(
-                                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                    .fill(vm.strokePreset == preset ? Color.accentColor : Color.primary.opacity(0.08))
-                            )
-                            .contentShape(Rectangle())
+                            .buttonStyle(.plain)
+                            .help(preset.localizedTooltip)
                         }
-                        .buttonStyle(.plain)
-                        .help(preset.localizedTooltip)
                     }
                 }
 
@@ -87,48 +89,61 @@ struct PinToolbarView: View {
                     Divider().frame(height: 16)
                     HStack(spacing: 2) {
                         ForEach(PinAnnotation.quickEmojiPalette, id: \.self) { emoji in
+                            let isSelected = vm.selectedEmoji == emoji
                             Button(action: {
                                 vm.selectedEmoji = emoji
                             }) {
                                 Text(emoji)
-                                    .font(.system(size: 13.5))
-                                    .frame(width: 22, height: 24)
+                                    .font(.system(size: 15))
+                                    .frame(width: 24, height: 24)
                                     .background(
-                                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                            .fill(vm.selectedEmoji == emoji ? Color.accentColor : Color.primary.opacity(0.06))
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .stroke(isSelected ? Color.accentColor.opacity(0.85) : Color.clear, lineWidth: 1.4)
                                     )
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }
                         if !PinAnnotation.quickEmojiPalette.contains(vm.selectedEmoji) {
-                            Button(action: {}) {
-                                Text(vm.selectedEmoji)
-                                    .font(.system(size: 13.5))
-                                    .frame(width: 22, height: 24)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                            .fill(Color.accentColor)
-                                    )
-                            }
-                            .buttonStyle(.plain)
+                            Text(vm.selectedEmoji)
+                                .font(.system(size: 15))
+                                .frame(width: 24, height: 24)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(Color.accentColor.opacity(0.18))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .stroke(Color.accentColor.opacity(0.85), lineWidth: 1.4)
+                                )
                         }
                         Button(action: {
                             vm.hostingPanel?.canvasView?.openSystemEmojiPicker()
                         }) {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.system(size: 12, weight: .semibold))
+                            Image(systemName: "face.smiling")
+                                .font(.system(size: 12.5, weight: .medium))
                                 .foregroundColor(.primary.opacity(0.85))
-                                .frame(width: 22, height: 24)
+                                .frame(width: 24, height: 24)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
                                         .fill(Color.primary.opacity(0.08))
                                 )
+                                .overlay(alignment: .bottomTrailing) {
+                                    Image(systemName: "plus.circle.fill")
+                                        .font(.system(size: 8.5, weight: .bold))
+                                        .foregroundColor(.accentColor)
+                                        .offset(x: 1, y: 1)
+                                }
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .help(L10n.emojiMorePickerTooltip)
                     }
+                    .padding(.horizontal, 2)
                 }
 
                 if styleTool == .text {

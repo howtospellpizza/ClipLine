@@ -114,8 +114,9 @@ enum TextBackgroundStyle: String, CaseIterable, Identifiable {
 }
 
 struct PinAnnotation: Identifiable {
+    static let defaultEmojiFontSize: CGFloat = 36.0
     static let quickEmojiPalette: [String] = [
-        "👍", "❤️", "🔥", "✅", "❌", "⚠️", "👀", "🎉", "💡", "🚀"
+        "👍", "❤️", "🔥", "✅", "❌", "👀", "🎉", "🚀"
     ]
 
     enum Tool: String, CaseIterable, Identifiable {

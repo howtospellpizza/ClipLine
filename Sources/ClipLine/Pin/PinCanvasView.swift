@@ -14,7 +14,7 @@ final class DraggableInlineTextField: NSTextField {
     }
 }
 
-final class PinCanvasNSView: NSView, NSTextFieldDelegate {
+final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
     let vm: PinSessionViewModel
     private var trackingArea: NSTrackingArea?
     private var activeResizeHandle: PinSessionViewModel.ResizeHandle?
@@ -52,11 +52,24 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
 
     private(set) var textField: NSTextField?
 
+    private var emojiCaptureInputView: NSTextView?
+
     init(frame: NSRect, vm: PinSessionViewModel) {
         self.vm = vm
         super.init(frame: frame)
         self.wantsLayer = true
         self.layer?.backgroundColor = NSColor.clear.cgColor
+
+        let captureView = NSTextView(frame: NSRect(x: -200, y: -200, width: 1, height: 1))
+        captureView.isEditable = true
+        captureView.isSelectable = true
+        captureView.isRichText = false
+        captureView.drawsBackground = false
+        captureView.insertionPointColor = .clear
+        captureView.textColor = .clear
+        captureView.delegate = self
+        addSubview(captureView)
+        self.emojiCaptureInputView = captureView
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -112,7 +125,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             let tool = current.tool
             let nextColor = (updateColor && tool != .mosaic && tool != .emoji) ? NSColor(vm.selectedColor) : current.color
             let nextWidth: CGFloat = {
-                guard updatePreset else { return current.lineWidth }
+                guard updatePreset && tool != .emoji else { return current.lineWidth }
                 return PinSessionViewModel.presetLineWidth(vm.strokePreset, for: tool)
             }()
             let nextBg: TextBackgroundStyle = (updateBackground && tool == .text) ? vm.textBackgroundStyle : current.textBackgroundStyle
@@ -140,10 +153,28 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
     func openSystemEmojiPicker() {
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
-        if textField == nil {
-            window?.makeFirstResponder(self)
+        if textField == nil, let captureView = emojiCaptureInputView {
+            captureView.string = ""
+            window?.makeFirstResponder(captureView)
         }
-        NSApp.orderFrontCharacterPalette(self)
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.window?.makeKeyAndOrderFront(nil)
+            if self.textField == nil, let captureView = self.emojiCaptureInputView {
+                captureView.string = ""
+                self.window?.makeFirstResponder(captureView)
+            }
+            NSApp.orderFrontCharacterPalette(self.emojiCaptureInputView ?? self)
+        }
+    }
+
+    func textDidChange(_ notification: Notification) {
+        guard let tv = notification.object as? NSTextView,
+              tv === emojiCaptureInputView else { return }
+        let current = tv.string
+        guard !current.isEmpty else { return }
+        tv.string = ""
+        handlePickedEmojiText(current)
     }
 
     override func insertText(_ insertString: Any) {
@@ -155,16 +186,22 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         } else {
             str = nil
         }
-        guard let raw = str?.trimmingCharacters(in: .whitespacesAndNewlines),
-              let firstChar = raw.first else {
-            return
-        }
-        let picked = String(firstChar)
+        guard let raw = str else { return }
+        handlePickedEmojiText(raw)
+    }
+
+    private func handlePickedEmojiText(_ raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let lastChar = trimmed.last else { return }
+        let picked = String(lastChar)
         if vm.activeTool != .emoji,
            !(vm.selectedTextAnnotationID != nil && vm.annotations.first(where: { $0.id == vm.selectedTextAnnotationID })?.tool == .emoji) {
             vm.activeTool = .emoji
         }
         vm.selectedEmoji = picked
+        if textField == nil {
+            window?.makeFirstResponder(self)
+        }
     }
 
     func pendingFieldHitRect() -> NSRect? {
@@ -681,7 +718,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
                 let newSticker = PinAnnotation(
                     tool: .emoji,
                     color: NSColor(vm.selectedColor),
-                    lineWidth: vm.strokePreset.emojiFontSize,
+                    lineWidth: PinAnnotation.defaultEmojiFontSize,
                     points: [normPt],
                     text: emojiStr
                 )
