@@ -1845,14 +1845,15 @@ func runAllTests() -> Int32 {
                 vm.selectedTextAnnotationID == placedEmoji?.id,
                 "Clicking canvas with .emoji tool places emoji sticker and auto-selects it"
             )
-            // Changing selectedEmoji while an emoji sticker is selected updates that sticker
+            // Changing selectedEmoji while an emoji sticker is selected deselects the placed sticker and leaves its emoji unchanged
             vm.selectedEmoji = "🚀"
             let updatedEmoji = vm.annotations.last
             t.check(
-                updatedEmoji?.text == "🚀",
-                "Changing selectedEmoji while an .emoji annotation is selected updates its emoji character"
+                updatedEmoji?.text == "🔥" && vm.selectedTextAnnotationID == nil,
+                "Changing selectedEmoji deselects the previously placed .emoji annotation without overwriting its emoji"
             )
-            // System Character Palette insertText(_:) or hidden emojiCaptureInputView text insertion updates selectedEmoji (and selected emoji annotation)
+            // System Character Palette insertText(_:) or hidden emojiCaptureInputView text insertion updates selectedEmoji for the next sticker without mutating existing ones
+            vm.selectedTextAnnotationID = updatedEmoji?.id
             canvas.openSystemEmojiPicker()
             if let responderView = pinPanel.firstResponder as? NSTextView {
                 responderView.insertText("🦄", replacementRange: NSRange(location: 0, length: 0))
@@ -1860,8 +1861,8 @@ func runAllTests() -> Int32 {
                 canvas.insertText("🦄")
             }
             t.check(
-                vm.selectedEmoji == "🦄" && vm.annotations.last?.text == "🦄",
-                "insertText from macOS Character Palette updates selectedEmoji and the selected emoji sticker"
+                vm.selectedEmoji == "🦄" && vm.selectedTextAnnotationID == nil && vm.annotations.last?.text == "🔥",
+                "insertText from macOS Character Palette updates selectedEmoji and deselects the previous emoji sticker"
             )
         } else {
             t.check(false, "Constructed mouse events for .emoji placement test")

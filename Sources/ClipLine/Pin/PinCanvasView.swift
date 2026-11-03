@@ -156,6 +156,11 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
 
     func openSystemEmojiPicker() {
         vm.commitPendingText()
+        if let selID = vm.selectedTextAnnotationID,
+           vm.annotations.first(where: { $0.id == selID })?.tool == .emoji {
+            vm.selectedTextAnnotationID = nil
+            needsDisplay = true
+        }
         let tv: NSTextView
         if let existing = emojiCaptureInputView {
             tv = existing
@@ -212,8 +217,11 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let lastChar = trimmed.last else { return }
         let picked = String(lastChar)
-        if vm.activeTool != .emoji,
-           !(vm.selectedTextAnnotationID != nil && vm.annotations.first(where: { $0.id == vm.selectedTextAnnotationID })?.tool == .emoji) {
+        if let selID = vm.selectedTextAnnotationID,
+           vm.annotations.first(where: { $0.id == selID })?.tool == .emoji {
+            vm.selectedTextAnnotationID = nil
+        }
+        if vm.activeTool != .emoji {
             vm.activeTool = .emoji
         }
         vm.selectedEmoji = picked

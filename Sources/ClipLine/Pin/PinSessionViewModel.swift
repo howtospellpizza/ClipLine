@@ -81,7 +81,11 @@ final class PinSessionViewModel: ObservableObject {
     @Published var selectedEmoji: String = PinAnnotation.quickEmojiPalette.first ?? "👍" {
         didSet {
             guard !isSyncingToolbarFromSelection else { return }
-            hostingPanel?.canvasView?.applyStyleChangeToSelectionOrField(updateColor: false, updatePreset: false, updateBackground: false, updateEmoji: true)
+            if let selID = selectedTextAnnotationID,
+               annotations.first(where: { $0.id == selID })?.tool == .emoji {
+                selectedTextAnnotationID = nil
+            }
+            hostingPanel?.canvasView?.needsDisplay = true
             updateToolbarPanelPosition()
         }
     }
