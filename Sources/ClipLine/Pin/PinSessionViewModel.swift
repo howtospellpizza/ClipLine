@@ -82,6 +82,17 @@ final class PinSessionViewModel: ObservableObject {
             updateToolbarPanelPosition()
         }
     }
+    @Published var isEmojiPopoverPresented: Bool = false
+    @Published var customEmojiInput: String = "" {
+        didSet {
+            let trimmed = customEmojiInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let lastChar = trimmed.last else { return }
+            let picked = String(lastChar)
+            customEmojiInput = ""
+            selectedEmoji = picked
+            isEmojiPopoverPresented = false
+        }
+    }
     @Published var selectedTextAnnotationID: UUID? = nil {
         didSet {
             if oldValue != selectedTextAnnotationID {

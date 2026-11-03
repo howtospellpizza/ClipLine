@@ -92,8 +92,15 @@ enum L10n {
 
     static var emojiMorePickerTooltip: String {
         switch AppLanguage.current {
-        case .en: return "Open macOS Emoji & Symbols Panel"
-        case .zhHans: return "打开系统表情与符号面板"
+        case .en: return "More Emoji Stickers"
+        case .zhHans: return "更多 Emoji 贴图"
+        }
+    }
+
+    static var emojiCustomInputPlaceholder: String {
+        switch AppLanguage.current {
+        case .en: return "Or paste / press ⌃⌘Space…"
+        case .zhHans: return "或粘贴 / 按 ⌃⌘Space 选任意表情…"
         }
     }
 
