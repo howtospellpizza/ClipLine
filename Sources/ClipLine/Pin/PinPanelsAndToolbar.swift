@@ -92,6 +92,7 @@ struct PinToolbarView: View {
                             ForEach(PinAnnotation.quickEmojiPalette, id: \.self) { emoji in
                                 let isSelected = vm.selectedEmoji == emoji
                                 Button(action: {
+                                    vm.hostingPanel?.canvasView?.teardownEmojiCaptureInputView()
                                     vm.selectedEmoji = emoji
                                 }) {
                                     Text(emoji)
@@ -122,20 +123,26 @@ struct PinToolbarView: View {
                         )
 
                         Button(action: {
-                            vm.isEmojiPopoverPresented.toggle()
+                            vm.hostingPanel?.canvasView?.openSystemEmojiPicker()
                         }) {
-                            Image(systemName: "chevron.up.square.fill")
-                                .symbolRenderingMode(.hierarchical)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(vm.isEmojiPopoverPresented ? .accentColor : .primary.opacity(0.75))
+                            Image(systemName: "face.smiling")
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundColor(.primary.opacity(0.85))
                                 .frame(width: 24, height: 24)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                        .fill(Color.primary.opacity(0.08))
+                                )
+                                .overlay(alignment: .bottomTrailing) {
+                                    Image(systemName: "plus.circle.fill")
+                                        .font(.system(size: 8.5, weight: .bold))
+                                        .foregroundColor(.accentColor)
+                                        .offset(x: 1, y: 1)
+                                }
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .help(L10n.emojiMorePickerTooltip)
-                        .popover(isPresented: $vm.isEmojiPopoverPresented, arrowEdge: .bottom) {
-                            EmojiStickerPopoverView(vm: vm)
-                        }
                     }
                 }
 
@@ -318,64 +325,6 @@ struct PinToolbarView: View {
         )
         .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 2)
         .padding(6)
-    }
-}
-
-struct EmojiStickerPopoverView: View {
-    @ObservedObject var vm: PinSessionViewModel
-
-    private let columns = Array(repeating: GridItem(.fixed(32), spacing: 4), count: 6)
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(PinAnnotation.categorizedEmojiSections.enumerated()), id: \.offset) { _, section in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(AppLanguage.current == .zhHans ? section.titleZH : section.titleEN)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.secondary)
-                    LazyVGrid(columns: columns, spacing: 4) {
-                        ForEach(section.emojis, id: \.self) { emoji in
-                            let isSelected = vm.selectedEmoji == emoji
-                            Button(action: {
-                                vm.selectedEmoji = emoji
-                                vm.isEmojiPopoverPresented = false
-                            }) {
-                                Text(emoji)
-                                    .font(.system(size: 18))
-                                    .frame(width: 32, height: 30)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                            .fill(isSelected ? Color.accentColor : Color.primary.opacity(0.06))
-                                    )
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-            }
-
-            Divider()
-
-            HStack(spacing: 6) {
-                TextField(L10n.emojiCustomInputPlaceholder, text: $vm.customEmojiInput)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12))
-
-                Button(action: {
-                    NSApp.orderFrontCharacterPalette(nil)
-                }) {
-                    Image(systemName: "face.smiling")
-                        .font(.system(size: 13, weight: .medium))
-                        .frame(width: 26, height: 24)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("⌃⌘Space")
-            }
-        }
-        .padding(12)
-        .frame(width: 240)
     }
 }
 

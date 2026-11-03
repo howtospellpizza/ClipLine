@@ -14,7 +14,7 @@ final class DraggableInlineTextField: NSTextField {
     }
 }
 
-final class PinCanvasNSView: NSView, NSTextFieldDelegate {
+final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
     let vm: PinSessionViewModel
     private var trackingArea: NSTrackingArea?
     private var activeResizeHandle: PinSessionViewModel.ResizeHandle?
@@ -51,6 +51,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
     private var windowDragStartOrigin: NSPoint = .zero
 
     private(set) var textField: NSTextField?
+    private var emojiCaptureInputView: NSTextView?
 
     init(frame: NSRect, vm: PinSessionViewModel) {
         self.vm = vm
@@ -137,8 +138,54 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         }
     }
 
+    func teardownEmojiCaptureInputView() {
+        guard let tv = emojiCaptureInputView else { return }
+        tv.delegate = nil
+        tv.removeFromSuperview()
+        emojiCaptureInputView = nil
+        if textField == nil {
+            window?.makeFirstResponder(self)
+        }
+    }
+
     func openSystemEmojiPicker() {
-        vm.isEmojiPopoverPresented.toggle()
+        vm.commitPendingText()
+        let tv: NSTextView
+        if let existing = emojiCaptureInputView {
+            tv = existing
+        } else {
+            let created = NSTextView(frame: NSRect(x: -200, y: -200, width: 2, height: 2))
+            created.isEditable = true
+            created.isSelectable = true
+            created.isRichText = false
+            created.drawsBackground = false
+            created.insertionPointColor = .clear
+            created.textColor = .clear
+            created.delegate = self
+            addSubview(created)
+            emojiCaptureInputView = created
+            tv = created
+        }
+        tv.string = ""
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+        window?.makeFirstResponder(tv)
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, let activeTV = self.emojiCaptureInputView else { return }
+            self.window?.makeKeyAndOrderFront(nil)
+            self.window?.makeFirstResponder(activeTV)
+            NSApp.orderFrontCharacterPalette(activeTV)
+        }
+    }
+
+    func textDidChange(_ notification: Notification) {
+        guard let tv = notification.object as? NSTextView,
+              tv === emojiCaptureInputView else { return }
+        let current = tv.string
+        guard !current.isEmpty else { return }
+        tv.string = ""
+        teardownEmojiCaptureInputView()
+        handlePickedEmojiText(current)
     }
 
     override func insertText(_ insertString: Any) {
@@ -151,6 +198,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
             str = nil
         }
         guard let raw = str else { return }
+        teardownEmojiCaptureInputView()
         handlePickedEmojiText(raw)
     }
 
@@ -544,6 +592,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate {
         if !NSApp.isActive {
             NSApp.activate(ignoringOtherApps: true)
         }
+        teardownEmojiCaptureInputView()
         window?.makeKeyAndOrderFront(nil)
         let pt = convert(event.locationInWindow, from: nil)
         let screenPt = NSEvent.mouseLocation

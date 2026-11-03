@@ -118,28 +118,6 @@ struct PinAnnotation: Identifiable {
     static let quickEmojiPalette: [String] = [
         "👍", "❤️", "🔥", "✅", "❌", "👀", "🎉", "🚀"
     ]
-    static let categorizedEmojiSections: [(titleEN: String, titleZH: String, emojis: [String])] = [
-        (
-            "Status & Marks",
-            "状态与标记",
-            ["✅", "❌", "⚠️", "❓", "❗️", "💯", "⭕️", "🚫", "📌", "🚩", "🔒", "🔑"]
-        ),
-        (
-            "Reactions & Hands",
-            "表态与手势",
-            ["👍", "👎", "👏", "🙌", "🙏", "🤝", "👌", "✌️", "👆", "👇", "👈", "👉"]
-        ),
-        (
-            "Faces",
-            "表情",
-            ["😀", "😂", "🥹", "😍", "🤔", "😎", "🥳", "🤯", "😱", "😭", "🫡", "🫠"]
-        ),
-        (
-            "Highlights & Symbols",
-            "重点与符号",
-            ["🔥", "❤️", "✨", "🎉", "🚀", "💡", "👀", "🎯", "⭐️", "⚡", "💬", "🔍"]
-        )
-    ]
 
     enum Tool: String, CaseIterable, Identifiable {
         case rect

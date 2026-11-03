@@ -49,6 +49,9 @@ final class PinSessionViewModel: ObservableObject {
             if activeTool != nil {
                 selectedTextAnnotationID = nil
             }
+            if activeTool != .emoji {
+                hostingPanel?.canvasView?.teardownEmojiCaptureInputView()
+            }
             if activeTool == .mosaic && pixelatedBaseImage == nil {
                 regeneratePixelatedImage()
             }
@@ -80,17 +83,6 @@ final class PinSessionViewModel: ObservableObject {
             guard !isSyncingToolbarFromSelection else { return }
             hostingPanel?.canvasView?.applyStyleChangeToSelectionOrField(updateColor: false, updatePreset: false, updateBackground: false, updateEmoji: true)
             updateToolbarPanelPosition()
-        }
-    }
-    @Published var isEmojiPopoverPresented: Bool = false
-    @Published var customEmojiInput: String = "" {
-        didSet {
-            let trimmed = customEmojiInput.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let lastChar = trimmed.last else { return }
-            let picked = String(lastChar)
-            customEmojiInput = ""
-            selectedEmoji = picked
-            isEmojiPopoverPresented = false
         }
     }
     @Published var selectedTextAnnotationID: UUID? = nil {
