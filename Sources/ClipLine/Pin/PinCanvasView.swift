@@ -138,13 +138,19 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
         }
     }
 
-    func teardownEmojiCaptureInputView() {
-        guard let tv = emojiCaptureInputView else { return }
-        tv.delegate = nil
-        tv.removeFromSuperview()
-        emojiCaptureInputView = nil
-        if textField == nil {
-            window?.makeFirstResponder(self)
+    func teardownEmojiCaptureInputView(dismissSystemPalette: Bool = false) {
+        if let tv = emojiCaptureInputView {
+            tv.delegate = nil
+            tv.removeFromSuperview()
+            emojiCaptureInputView = nil
+            if textField == nil {
+                window?.makeFirstResponder(self)
+            }
+        }
+        if dismissSystemPalette {
+            for app in NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.CharacterPaletteIM") {
+                app.terminate()
+            }
         }
     }
 
@@ -184,7 +190,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
         let current = tv.string
         guard !current.isEmpty else { return }
         tv.string = ""
-        teardownEmojiCaptureInputView()
+        teardownEmojiCaptureInputView(dismissSystemPalette: true)
         handlePickedEmojiText(current)
     }
 
@@ -198,7 +204,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             str = nil
         }
         guard let raw = str else { return }
-        teardownEmojiCaptureInputView()
+        teardownEmojiCaptureInputView(dismissSystemPalette: true)
         handlePickedEmojiText(raw)
     }
 
@@ -726,6 +732,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
 
             if tool == .emoji {
                 vm.commitPendingText()
+                teardownEmojiCaptureInputView(dismissSystemPalette: true)
                 vm.recordUndoSnapshot()
                 let emojiStr = vm.selectedEmoji.isEmpty ? "👍" : vm.selectedEmoji
                 let newSticker = PinAnnotation(

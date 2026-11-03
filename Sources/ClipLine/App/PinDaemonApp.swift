@@ -356,7 +356,7 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
         let closeClosure: () -> Void = { [weak self, weak vm, weak panel, weak tbPanel] in
             vm?.isClosed = true
             vm?.cancelActiveOCR()
-            panel?.canvasView?.teardownEmojiCaptureInputView()
+            panel?.canvasView?.teardownEmojiCaptureInputView(dismissSystemPalette: true)
             if let panel, let tbPanel, panel.childWindows?.contains(tbPanel) == true {
                 panel.removeChildWindow(tbPanel)
             }
