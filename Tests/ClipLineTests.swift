@@ -1935,7 +1935,31 @@ func runAllTests() -> Int32 {
         vm.annotations.append(resizableText)
         vm.selectedTextAnnotationID = resizableText.id
         let textHandles = canvas.selectedAnnotationCornerHandlesInView()
-        if let brTextPt = textHandles.first(where: { $0.0 == .bottomRight })?.1,
+        if let tlPt = textHandles.first(where: { $0.0 == .topLeft })?.1,
+           let tlDown = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: tlPt, modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 58, clickCount: 1, pressure: 1.0
+           ),
+           let tlDrag = NSEvent.mouseEvent(
+            with: .leftMouseDragged, location: NSPoint(x: tlPt.x - 2, y: tlPt.y + 2), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 59, clickCount: 1, pressure: 1.0
+           ),
+           let tlUp = NSEvent.mouseEvent(
+            with: .leftMouseUp, location: NSPoint(x: tlPt.x - 2, y: tlPt.y + 2), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 60, clickCount: 1, pressure: 1.0
+           ) {
+            let before = vm.annotations.first(where: { $0.id == resizableText.id })?.lineWidth ?? 0
+            canvas.mouseDown(with: tlDown)
+            canvas.mouseDragged(with: tlDrag)
+            canvas.mouseUp(with: tlUp)
+            let after = vm.annotations.first(where: { $0.id == resizableText.id })?.lineWidth ?? 0
+            t.check(
+                after >= before - 0.5,
+                "A tiny outward drag on a .text top-left handle does not abruptly shrink the font",
+                detail: "before=\(before), after=\(after)"
+            )
+        }
+        if let brTextPt = canvas.selectedAnnotationCornerHandlesInView().first(where: { $0.0 == .bottomRight })?.1,
            let trDown = NSEvent.mouseEvent(
             with: .leftMouseDown, location: brTextPt, modifierFlags: [],
             timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 55, clickCount: 1, pressure: 1.0

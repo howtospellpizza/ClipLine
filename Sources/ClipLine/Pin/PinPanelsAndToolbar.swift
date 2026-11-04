@@ -93,6 +93,9 @@ struct PinToolbarView: View {
                                 let isSelected = vm.selectedEmoji == emoji
                                 Button(action: {
                                     vm.hostingPanel?.canvasView?.teardownEmojiCaptureInputView()
+                                    if vm.activeTool != .emoji {
+                                        vm.activeTool = .emoji
+                                    }
                                     if let selID = vm.selectedTextAnnotationID,
                                        vm.annotations.first(where: { $0.id == selID })?.tool == .emoji {
                                         vm.selectedTextAnnotationID = nil

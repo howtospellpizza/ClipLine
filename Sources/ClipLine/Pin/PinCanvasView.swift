@@ -52,6 +52,8 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
 
     private(set) var textField: NSTextField?
     private var emojiCaptureInputView: NSTextView?
+    /// True only after this canvas itself opened the system palette, so teardown never quits a palette opened elsewhere
+    private var didOpenSystemEmojiPalette = false
 
     init(frame: NSRect, vm: PinSessionViewModel) {
         self.vm = vm
@@ -147,7 +149,8 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
                 window?.makeFirstResponder(self)
             }
         }
-        if dismissSystemPalette {
+        if dismissSystemPalette && didOpenSystemEmojiPalette {
+            didOpenSystemEmojiPalette = false
             for app in NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.CharacterPaletteIM") {
                 app.terminate()
             }
@@ -185,6 +188,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             guard let self = self, let activeTV = self.emojiCaptureInputView else { return }
             self.window?.makeKeyAndOrderFront(nil)
             self.window?.makeFirstResponder(activeTV)
+            self.didOpenSystemEmojiPalette = true
             NSApp.orderFrontCharacterPalette(activeTV)
         }
     }
@@ -629,7 +633,11 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             let insetRect = hitRect.insetBy(dx: 2, dy: 2)
             let anchorPt: NSPoint
             if selItem.tool == .text {
-                anchorPt = NSPoint(x: insetRect.minX, y: insetRect.maxY)
+                // Opposite corner of the dragged handle, so no handle starts at zero distance from its anchor
+                anchorPt = NSPoint(
+                    x: (cornerHandle == .topLeft || cornerHandle == .bottomLeft) ? insetRect.maxX : insetRect.minX,
+                    y: (cornerHandle == .topLeft || cornerHandle == .topRight) ? insetRect.minY : insetRect.maxY
+                )
             } else {
                 anchorPt = NSPoint(x: insetRect.midX, y: insetRect.midY)
             }
