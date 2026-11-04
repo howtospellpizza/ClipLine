@@ -69,6 +69,14 @@ enum StrokePreset: String, CaseIterable, Identifiable {
         }
     }
 
+    var emojiFontSize: CGFloat {
+        switch self {
+        case .thin: return 24.0
+        case .medium: return 36.0
+        case .thick: return 52.0
+        }
+    }
+
     var dotDiameter: CGFloat {
         switch self {
         case .thin: return 6.0
@@ -106,6 +114,11 @@ enum TextBackgroundStyle: String, CaseIterable, Identifiable {
 }
 
 struct PinAnnotation: Identifiable {
+    static let defaultEmojiFontSize: CGFloat = 36.0
+    static let quickEmojiPalette: [String] = [
+        "👍", "❤️", "🔥", "✅", "❌", "👀", "🎉", "🚀"
+    ]
+
     enum Tool: String, CaseIterable, Identifiable {
         case rect
         case arrow
@@ -114,6 +127,7 @@ struct PinAnnotation: Identifiable {
         case counter
         case mosaic
         case text
+        case emoji
 
         var id: String { rawValue }
 
@@ -130,6 +144,16 @@ struct PinAnnotation: Identifiable {
             case .counter: return "1.circle.fill"
             case .mosaic: return "checkerboard.rectangle"
             case .text: return "textformat"
+            case .emoji: return "face.smiling"
+            }
+        }
+
+        var supportsCornerResize: Bool {
+            switch self {
+            case .text, .emoji, .counter:
+                return true
+            default:
+                return false
             }
         }
     }

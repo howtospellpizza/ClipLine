@@ -33,34 +33,36 @@ struct PinToolbarView: View {
             let selectedTool: PinAnnotation.Tool? = vm.annotations.first(where: { $0.id == vm.selectedTextAnnotationID })?.tool
             let activeOrSelectedTool: PinAnnotation.Tool? = selectedTool ?? vm.activeTool
             if let styleTool = activeOrSelectedTool {
-                Divider().frame(height: 16)
-                HStack(spacing: 3) {
-                    ForEach(StrokePreset.allCases) { preset in
-                        Button(action: {
-                            vm.strokePreset = preset
-                        }) {
-                            HStack(spacing: 3) {
-                                Circle()
-                                    .fill(vm.strokePreset == preset ? Color.white : Color.primary.opacity(0.75))
-                                    .frame(width: preset.dotDiameter, height: preset.dotDiameter)
-                                Text(preset.localizedShortLabel)
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(vm.strokePreset == preset ? .white : .primary.opacity(0.85))
+                if styleTool != .emoji {
+                    Divider().frame(height: 16)
+                    HStack(spacing: 3) {
+                        ForEach(StrokePreset.allCases) { preset in
+                            Button(action: {
+                                vm.strokePreset = preset
+                            }) {
+                                HStack(spacing: 3) {
+                                    Circle()
+                                        .fill(vm.strokePreset == preset ? Color.white : Color.primary.opacity(0.75))
+                                        .frame(width: preset.dotDiameter, height: preset.dotDiameter)
+                                    Text(preset.localizedShortLabel)
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(vm.strokePreset == preset ? .white : .primary.opacity(0.85))
+                                }
+                                .padding(.horizontal, 5)
+                                .frame(height: 24)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                        .fill(vm.strokePreset == preset ? Color.accentColor : Color.primary.opacity(0.08))
+                                )
+                                .contentShape(Rectangle())
                             }
-                            .padding(.horizontal, 5)
-                            .frame(height: 24)
-                            .background(
-                                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                    .fill(vm.strokePreset == preset ? Color.accentColor : Color.primary.opacity(0.08))
-                            )
-                            .contentShape(Rectangle())
+                            .buttonStyle(.plain)
+                            .help(preset.localizedTooltip)
                         }
-                        .buttonStyle(.plain)
-                        .help(preset.localizedTooltip)
                     }
                 }
 
-                if styleTool != .mosaic {
+                if styleTool != .mosaic && styleTool != .emoji {
                     Divider().frame(height: 16)
                     HStack(spacing: 4) {
                         ForEach(palette, id: \.self) { c in
@@ -81,6 +83,74 @@ struct PinToolbarView: View {
                         }
                     }
                     .padding(.horizontal, 1)
+                }
+
+                if styleTool == .emoji {
+                    Divider().frame(height: 16)
+                    HStack(spacing: 3) {
+                        HStack(spacing: 2) {
+                            ForEach(PinAnnotation.quickEmojiPalette, id: \.self) { emoji in
+                                let isSelected = vm.selectedEmoji == emoji
+                                Button(action: {
+                                    vm.hostingPanel?.canvasView?.teardownEmojiCaptureInputView()
+                                    if vm.activeTool != .emoji {
+                                        vm.activeTool = .emoji
+                                    }
+                                    if let selID = vm.selectedTextAnnotationID,
+                                       vm.annotations.first(where: { $0.id == selID })?.tool == .emoji {
+                                        vm.selectedTextAnnotationID = nil
+                                    }
+                                    vm.selectedEmoji = emoji
+                                }) {
+                                    Text(emoji)
+                                        .font(.system(size: 14.5))
+                                        .frame(width: 24, height: 22)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                                .fill(isSelected ? Color.accentColor : Color.clear)
+                                        )
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            if !PinAnnotation.quickEmojiPalette.contains(vm.selectedEmoji) {
+                                Text(vm.selectedEmoji)
+                                    .font(.system(size: 14.5))
+                                    .frame(width: 24, height: 22)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                            .fill(Color.accentColor)
+                                    )
+                            }
+                        }
+                        .padding(1)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.primary.opacity(0.07))
+                        )
+
+                        Button(action: {
+                            vm.hostingPanel?.canvasView?.openSystemEmojiPicker()
+                        }) {
+                            Image(systemName: "face.smiling")
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .foregroundColor(.primary.opacity(0.85))
+                                .frame(width: 24, height: 24)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                        .fill(Color.primary.opacity(0.08))
+                                )
+                                .overlay(alignment: .bottomTrailing) {
+                                    Image(systemName: "plus.circle.fill")
+                                        .font(.system(size: 8.5, weight: .bold))
+                                        .foregroundColor(.accentColor)
+                                        .offset(x: 1, y: 1)
+                                }
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(L10n.emojiMorePickerTooltip)
+                    }
                 }
 
                 if styleTool == .text {
@@ -288,6 +358,10 @@ final class PinToolbarPanel: NSPanel {
         onEscape?()
     }
 
+    override func insertText(_ insertString: Any) {
+        viewModel?.hostingPanel?.canvasView?.insertText(insertString)
+    }
+
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 {
             if let vm = viewModel, vm.pendingTextNormalizedPos != nil {
@@ -340,6 +414,10 @@ final class PinFloatingPanel: NSPanel {
               let onOpenSettings else { return false }
         onOpenSettings()
         return true
+    }
+
+    override func insertText(_ insertString: Any) {
+        canvasView?.insertText(insertString)
     }
 
     override func keyDown(with event: NSEvent) {

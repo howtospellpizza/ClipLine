@@ -74,6 +74,7 @@ enum L10n {
             case .counter: return "Step Counter"
             case .mosaic: return "Mosaic"
             case .text: return "Text"
+            case .emoji: return "Emoji Sticker"
             }
         case .zhHans:
             switch tool {
@@ -84,7 +85,15 @@ enum L10n {
             case .counter: return "序号章"
             case .mosaic: return "马赛克"
             case .text: return "文字"
+            case .emoji: return "Emoji 贴图"
             }
+        }
+    }
+
+    static var emojiMorePickerTooltip: String {
+        switch AppLanguage.current {
+        case .en: return "Open macOS Emoji & Symbols Panel"
+        case .zhHans: return "打开系统表情面板"
         }
     }
 

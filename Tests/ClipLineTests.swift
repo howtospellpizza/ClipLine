@@ -1822,6 +1822,198 @@ func runAllTests() -> Int32 {
             t.check(false, "Constructed mouse events for mid-drag Undo cancellation test")
         }
         vm.annotations.removeAll(where: { $0.id == unchangedTextAnn.id })
+
+        // Verify Emoji Sticker (.emoji) placement, quick emoji selection, system picker insertText, and composite rendering
+        vm.activeTool = .emoji
+        vm.selectedEmoji = "🔥"
+        let emojiPlacePt = NSPoint(x: imgR.minX + 0.45 * imgR.width, y: imgR.maxY - 0.55 * imgR.height)
+        if let eDown = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: emojiPlacePt, modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 50, clickCount: 1, pressure: 1.0
+        ),
+           let eUp = NSEvent.mouseEvent(
+            with: .leftMouseUp, location: emojiPlacePt, modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 51, clickCount: 1, pressure: 1.0
+           ) {
+            canvas.mouseDown(with: eDown)
+            canvas.mouseUp(with: eUp)
+            let placedEmoji = vm.annotations.last
+            t.check(
+                placedEmoji?.tool == .emoji &&
+                placedEmoji?.text == "🔥" &&
+                placedEmoji?.lineWidth == PinAnnotation.defaultEmojiFontSize &&
+                vm.selectedTextAnnotationID == placedEmoji?.id,
+                "Clicking canvas with .emoji tool places emoji sticker and auto-selects it"
+            )
+            // Changing selectedEmoji while an emoji sticker is selected deselects the placed sticker and leaves its emoji unchanged
+            vm.selectedEmoji = "🚀"
+            let updatedEmoji = vm.annotations.last
+            t.check(
+                updatedEmoji?.text == "🔥" && vm.selectedTextAnnotationID == nil,
+                "Changing selectedEmoji deselects the previously placed .emoji annotation without overwriting its emoji"
+            )
+            // System Character Palette insertText(_:) or hidden emojiCaptureInputView text insertion updates selectedEmoji for the next sticker without mutating existing ones
+            vm.selectedTextAnnotationID = updatedEmoji?.id
+            canvas.openSystemEmojiPicker()
+            if let responderView = pinPanel.firstResponder as? NSTextView {
+                responderView.insertText("🦄", replacementRange: NSRange(location: 0, length: 0))
+            } else {
+                canvas.insertText("🦄")
+            }
+            t.check(
+                vm.selectedEmoji == "🦄" && vm.selectedTextAnnotationID == nil && vm.annotations.last?.text == "🔥",
+                "insertText from macOS Character Palette updates selectedEmoji and deselects the previous emoji sticker"
+            )
+        } else {
+            t.check(false, "Constructed mouse events for .emoji placement test")
+        }
+
+        // Verify 4-corner drag resizing on committed .emoji, .counter, and .text annotations (with custom size preservation on double-click re-edit)
+        if let emojiID = vm.annotations.last(where: { $0.tool == .emoji })?.id,
+           let emojiItem = vm.annotations.first(where: { $0.id == emojiID }),
+           let emojiHitRect = canvas.textAnnotationHitRectInView(emojiItem),
+           let reselectDown = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: NSPoint(x: emojiHitRect.midX, y: emojiHitRect.midY), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 51, clickCount: 1, pressure: 1.0
+           ),
+           let reselectUp = NSEvent.mouseEvent(
+            with: .leftMouseUp, location: NSPoint(x: emojiHitRect.midX, y: emojiHitRect.midY), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 51, clickCount: 1, pressure: 1.0
+           ) {
+            // Clicking an earlier emoji sticker on canvas re-selects it (preserving selection for corner resize)
+            canvas.mouseDown(with: reselectDown)
+            canvas.mouseUp(with: reselectUp)
+            let handles = canvas.selectedAnnotationCornerHandlesInView()
+            t.check(
+                vm.selectedTextAnnotationID == emojiID && handles.count == 4,
+                "Clicking an existing .emoji annotation re-selects it and exposes 4 corner resize handles"
+            )
+            if let brHandlePt = handles.first(where: { $0.0 == .bottomRight })?.1,
+               let rDown = NSEvent.mouseEvent(
+                with: .leftMouseDown, location: brHandlePt, modifierFlags: [],
+                timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 52, clickCount: 1, pressure: 1.0
+               ),
+               let rDrag = NSEvent.mouseEvent(
+                with: .leftMouseDragged, location: NSPoint(x: brHandlePt.x + 25, y: brHandlePt.y - 25), modifierFlags: [],
+                timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 53, clickCount: 1, pressure: 1.0
+               ),
+               let rUp = NSEvent.mouseEvent(
+                with: .leftMouseUp, location: NSPoint(x: brHandlePt.x + 25, y: brHandlePt.y - 25), modifierFlags: [],
+                timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 54, clickCount: 1, pressure: 1.0
+               ) {
+                let startEmojiWidth = vm.annotations.first(where: { $0.id == emojiID })?.lineWidth ?? 0
+                let undoBeforeEmojiResize = vm.undoHistory.count
+                canvas.mouseDown(with: rDown)
+                canvas.mouseDragged(with: rDrag)
+                canvas.mouseUp(with: rUp)
+                let resizedEmojiWidth = vm.annotations.first(where: { $0.id == emojiID })?.lineWidth ?? 0
+                t.check(
+                    resizedEmojiWidth > startEmojiWidth + 4.0 &&
+                    vm.undoHistory.count == undoBeforeEmojiResize + 1,
+                    "Dragging a corner handle on a selected .emoji annotation scales its size smoothly and records a single undo snapshot",
+                    detail: "start=\(startEmojiWidth), resized=\(resizedEmojiWidth)"
+                )
+                vm.undo()
+                let restoredEmojiWidth = vm.annotations.first(where: { $0.id == emojiID })?.lineWidth ?? 0
+                t.check(
+                    abs(restoredEmojiWidth - startEmojiWidth) < 0.01,
+                    "Undoing a corner-handle resize restores the previous annotation size"
+                )
+            }
+            vm.annotations.removeAll(where: { $0.id == emojiID })
+        }
+
+        // Verify corner-handle resize on committed .text annotation AND preserving custom size across double-click re-edit
+        let resizableText = PinAnnotation(
+            tool: .text,
+            color: NSColor(.white),
+            lineWidth: StrokePreset.medium.textFontSize,
+            points: [CGPoint(x: 0.25, y: 0.45)],
+            text: "ScaleMe",
+            textBackgroundStyle: .black
+        )
+        vm.annotations.append(resizableText)
+        vm.selectedTextAnnotationID = resizableText.id
+        let textHandles = canvas.selectedAnnotationCornerHandlesInView()
+        func dragTextTopLeft(by delta: NSPoint, eventBase: Int) -> Bool {
+            guard let tlPt = canvas.selectedAnnotationCornerHandlesInView().first(where: { $0.0 == .topLeft })?.1,
+                  let down = NSEvent.mouseEvent(with: .leftMouseDown, location: tlPt, modifierFlags: [], timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: eventBase, clickCount: 1, pressure: 1.0),
+                  let drag = NSEvent.mouseEvent(with: .leftMouseDragged, location: NSPoint(x: tlPt.x + delta.x, y: tlPt.y + delta.y), modifierFlags: [], timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: eventBase + 1, clickCount: 1, pressure: 1.0),
+                  let up = NSEvent.mouseEvent(with: .leftMouseUp, location: NSPoint(x: tlPt.x + delta.x, y: tlPt.y + delta.y), modifierFlags: [], timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: eventBase + 2, clickCount: 1, pressure: 1.0) else { return false }
+            canvas.mouseDown(with: down)
+            canvas.mouseDragged(with: drag)
+            canvas.mouseUp(with: up)
+            return true
+        }
+        let tlRectBefore = vm.annotations.first(where: { $0.id == resizableText.id }).flatMap { canvas.textAnnotationHitRectInView($0) } ?? .zero
+        let tlSizeBefore = vm.annotations.first(where: { $0.id == resizableText.id })?.lineWidth ?? 0
+        t.check(dragTextTopLeft(by: NSPoint(x: -14, y: 10), eventBase: 58), "Constructed top-left text handle outward drag events")
+        let tlItemOut = vm.annotations.first(where: { $0.id == resizableText.id })
+        let tlRectOut = tlItemOut.flatMap { canvas.textAnnotationHitRectInView($0) } ?? .zero
+        t.check(
+            (tlItemOut?.lineWidth ?? 0) > tlSizeBefore + 1.0 &&
+            abs(tlRectOut.maxX - tlRectBefore.maxX) < 4.0 && abs(tlRectOut.minY - tlRectBefore.minY) < 4.0,
+            "Dragging a .text top-left handle outward grows the font while the opposite (bottom-right) corner stays fixed",
+            detail: "size \(tlSizeBefore)->\(tlItemOut?.lineWidth ?? 0), rect \(tlRectBefore)->\(tlRectOut)"
+        )
+        let tlSizeOut = tlItemOut?.lineWidth ?? 0
+        t.check(dragTextTopLeft(by: NSPoint(x: 10, y: -8), eventBase: 61), "Constructed top-left text handle inward drag events")
+        t.check(
+            (vm.annotations.first(where: { $0.id == resizableText.id })?.lineWidth ?? 0) < tlSizeOut - 1.0,
+            "Dragging a .text top-left handle inward shrinks the font"
+        )
+        if let brTextPt = canvas.selectedAnnotationCornerHandlesInView().first(where: { $0.0 == .bottomRight })?.1,
+           let trDown = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: brTextPt, modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 55, clickCount: 1, pressure: 1.0
+           ),
+           let trDrag = NSEvent.mouseEvent(
+            with: .leftMouseDragged, location: NSPoint(x: brTextPt.x + 36, y: brTextPt.y - 24), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 56, clickCount: 1, pressure: 1.0
+           ),
+           let trUp = NSEvent.mouseEvent(
+            with: .leftMouseUp, location: NSPoint(x: brTextPt.x + 36, y: brTextPt.y - 24), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 57, clickCount: 1, pressure: 1.0
+           ) {
+            let beforeTextWidth = vm.annotations.first(where: { $0.id == resizableText.id })?.lineWidth ?? 0
+            canvas.mouseDown(with: trDown)
+            canvas.mouseDragged(with: trDrag)
+            canvas.mouseUp(with: trUp)
+            let customTextWidth = vm.annotations.first(where: { $0.id == resizableText.id })?.lineWidth ?? 0
+            t.check(
+                customTextWidth > beforeTextWidth + 3.0,
+                "Dragging a corner handle on a committed .text annotation scales its font size",
+                detail: "before=\(beforeTextWidth), after=\(customTextWidth)"
+            )
+            // Double-click to re-edit text content without touching S/M/L preset: custom font size must be preserved!
+            if let hitRectAfterResize = vm.annotations.first(where: { $0.id == resizableText.id }).flatMap({ canvas.textAnnotationHitRectInView($0) }),
+               let dblEv = NSEvent.mouseEvent(
+                with: .leftMouseDown, location: NSPoint(x: hitRectAfterResize.midX, y: hitRectAfterResize.midY), modifierFlags: [],
+                timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 58, clickCount: 2, pressure: 1.0
+               ) {
+                canvas.mouseDown(with: dblEv)
+                canvas.textField?.stringValue = "ScaleMeEdited"
+                vm.commitPendingText()
+                let editedItem = vm.annotations.first(where: { $0.id == resizableText.id })
+                t.check(
+                    editedItem?.text == "ScaleMeEdited" &&
+                    abs((editedItem?.lineWidth ?? 0) - customTextWidth) < 0.01,
+                    "Double-clicking and editing a custom-resized .text annotation preserves its custom font size unless S/M/L is clicked",
+                    detail: "customTextWidth=\(customTextWidth), editedLineWidth=\(String(describing: editedItem?.lineWidth))"
+                )
+            }
+            // Clicking S/M/L preset while selected snaps back to the preset size
+            vm.selectedTextAnnotationID = resizableText.id
+            vm.strokePreset = .thin
+            let snappedItem = vm.annotations.first(where: { $0.id == resizableText.id })
+            t.check(
+                snappedItem?.lineWidth == StrokePreset.thin.textFontSize,
+                "Selecting S/M/L preset on a custom-resized .text annotation snaps it to the chosen preset font size"
+            )
+        }
+        vm.annotations.removeAll(where: { $0.id == resizableText.id })
+        vm.selectedTextAnnotationID = nil
+        vm.activeTool = nil
     }
     let composite = vm.renderCompositeImage()
     t.check(composite?.size == vm.baseSize, "renderCompositeImage outputs exact baseSize")
