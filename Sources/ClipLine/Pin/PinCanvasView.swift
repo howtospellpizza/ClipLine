@@ -57,10 +57,15 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
     /// Only the canvas that most recently opened the system palette may dismiss it
     private static weak var paletteOwner: PinCanvasNSView?
     /// PIDs of palette processes launched by this canvas's request (never ones that were already running)
-    private var ownedPalettePIDs: Set<pid_t> = []
+    private var ownedPalettePIDs: [pid_t: Date] = [:]
 
-    private static func runningPalettePIDs() -> Set<pid_t> {
-        Set(NSRunningApplication.runningApplications(withBundleIdentifier: characterPaletteBundleID).map { $0.processIdentifier })
+    /// Running palette processes keyed by PID with launch date, so a recycled PID can never match
+    private static func runningPalettes() -> [pid_t: Date] {
+        var result: [pid_t: Date] = [:]
+        for app in NSRunningApplication.runningApplications(withBundleIdentifier: characterPaletteBundleID) {
+            result[app.processIdentifier] = app.launchDate ?? .distantPast
+        }
+        return result
     }
 
     init(frame: NSRect, vm: PinSessionViewModel) {
@@ -159,10 +164,10 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
         }
         if dismissSystemPalette, Self.paletteOwner === self, !ownedPalettePIDs.isEmpty {
             for app in NSRunningApplication.runningApplications(withBundleIdentifier: Self.characterPaletteBundleID)
-            where ownedPalettePIDs.contains(app.processIdentifier) {
+            where ownedPalettePIDs[app.processIdentifier] == (app.launchDate ?? .distantPast) {
                 app.terminate()
             }
-            ownedPalettePIDs = []
+            ownedPalettePIDs = [:]
             Self.paletteOwner = nil
         }
     }
@@ -191,7 +196,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             tv = created
         }
         tv.string = ""
-        let palettePIDsBefore = Self.runningPalettePIDs()
+        let palettesBefore = Self.runningPalettes()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         window?.makeFirstResponder(tv)
@@ -202,7 +207,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             NSApp.orderFrontCharacterPalette(activeTV)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
                 guard let self = self, self.emojiCaptureInputView != nil else { return }
-                let launched = Self.runningPalettePIDs().subtracting(palettePIDsBefore)
+                let launched = Self.runningPalettes().filter { palettesBefore[$0.key] != $0.value }
                 guard !launched.isEmpty else { return }
                 self.ownedPalettePIDs = launched
                 Self.paletteOwner = self
