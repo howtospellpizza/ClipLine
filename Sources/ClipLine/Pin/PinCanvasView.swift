@@ -32,6 +32,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
     private var annotationResizeAnchorViewPoint: NSPoint = .zero
     private var annotationResizeStartDistance: CGFloat = 1.0
     private var annotationResizeDidChange: Bool = false
+    private var annotationResizeStartPoints: [CGPoint] = []
 
     func cancelActiveAnnotationDrag() {
         draggingTextAnnotationID = nil
@@ -52,8 +53,15 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
 
     private(set) var textField: NSTextField?
     private var emojiCaptureInputView: NSTextView?
-    /// True only after this canvas itself opened the system palette, so teardown never quits a palette opened elsewhere
-    private var didOpenSystemEmojiPalette = false
+    private static let characterPaletteBundleID = "com.apple.CharacterPaletteIM"
+    /// Only the canvas that most recently opened the system palette may dismiss it
+    private static weak var paletteOwner: PinCanvasNSView?
+    /// PIDs of palette processes launched by this canvas's request (never ones that were already running)
+    private var ownedPalettePIDs: Set<pid_t> = []
+
+    private static func runningPalettePIDs() -> Set<pid_t> {
+        Set(NSRunningApplication.runningApplications(withBundleIdentifier: characterPaletteBundleID).map { $0.processIdentifier })
+    }
 
     init(frame: NSRect, vm: PinSessionViewModel) {
         self.vm = vm
@@ -149,11 +157,13 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
                 window?.makeFirstResponder(self)
             }
         }
-        if dismissSystemPalette && didOpenSystemEmojiPalette {
-            didOpenSystemEmojiPalette = false
-            for app in NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.CharacterPaletteIM") {
+        if dismissSystemPalette, Self.paletteOwner === self, !ownedPalettePIDs.isEmpty {
+            for app in NSRunningApplication.runningApplications(withBundleIdentifier: Self.characterPaletteBundleID)
+            where ownedPalettePIDs.contains(app.processIdentifier) {
                 app.terminate()
             }
+            ownedPalettePIDs = []
+            Self.paletteOwner = nil
         }
     }
 
@@ -181,6 +191,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             tv = created
         }
         tv.string = ""
+        let palettePIDsBefore = Self.runningPalettePIDs()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         window?.makeFirstResponder(tv)
@@ -188,8 +199,14 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             guard let self = self, let activeTV = self.emojiCaptureInputView else { return }
             self.window?.makeKeyAndOrderFront(nil)
             self.window?.makeFirstResponder(activeTV)
-            self.didOpenSystemEmojiPalette = true
             NSApp.orderFrontCharacterPalette(activeTV)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                guard let self = self, self.emojiCaptureInputView != nil else { return }
+                let launched = Self.runningPalettePIDs().subtracting(palettePIDsBefore)
+                guard !launched.isEmpty else { return }
+                self.ownedPalettePIDs = launched
+                Self.paletteOwner = self
+            }
         }
     }
 
@@ -632,8 +649,9 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
            let hitRect = textAnnotationHitRectInView(selItem) {
             let insetRect = hitRect.insetBy(dx: 2, dy: 2)
             let anchorPt: NSPoint
+            annotationResizeStartPoints = selItem.points
             if selItem.tool == .text {
-                // Opposite corner of the dragged handle, so no handle starts at zero distance from its anchor
+                // Opposite corner of the dragged handle stays fixed while the text scales around it
                 anchorPt = NSPoint(
                     x: (cornerHandle == .topLeft || cornerHandle == .bottomLeft) ? insetRect.maxX : insetRect.minX,
                     y: (cornerHandle == .topLeft || cornerHandle == .topRight) ? insetRect.minY : insetRect.maxY
@@ -822,6 +840,21 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
                     annotationResizeDidChange = true
                 }
                 vm.annotations[idx].lineWidth = nextWidth
+                if tool == .text, let startPt = annotationResizeStartPoints.first {
+                    // Re-measure the box at the new size, then shift the text so the opposite corner stays on its anchor
+                    vm.annotations[idx].points = [startPt]
+                    if let box = textAnnotationHitRectInView(vm.annotations[idx])?.insetBy(dx: 2, dy: 2) {
+                        let img = imageRectInView
+                        let cornerX = (cornerHandle == .topLeft || cornerHandle == .bottomLeft) ? box.maxX : box.minX
+                        let cornerY = (cornerHandle == .topLeft || cornerHandle == .topRight) ? box.minY : box.maxY
+                        let dx = annotationResizeAnchorViewPoint.x - cornerX
+                        let dy = annotationResizeAnchorViewPoint.y - cornerY
+                        vm.annotations[idx].points = [CGPoint(
+                            x: max(0, min(1, startPt.x + dx / max(1, img.width))),
+                            y: max(0, min(1, startPt.y - dy / max(1, img.height)))
+                        )]
+                    }
+                }
                 needsDisplay = true
             }
             cornerHandle.cursor.set()

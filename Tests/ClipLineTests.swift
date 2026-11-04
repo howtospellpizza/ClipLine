@@ -1935,30 +1935,33 @@ func runAllTests() -> Int32 {
         vm.annotations.append(resizableText)
         vm.selectedTextAnnotationID = resizableText.id
         let textHandles = canvas.selectedAnnotationCornerHandlesInView()
-        if let tlPt = textHandles.first(where: { $0.0 == .topLeft })?.1,
-           let tlDown = NSEvent.mouseEvent(
-            with: .leftMouseDown, location: tlPt, modifierFlags: [],
-            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 58, clickCount: 1, pressure: 1.0
-           ),
-           let tlDrag = NSEvent.mouseEvent(
-            with: .leftMouseDragged, location: NSPoint(x: tlPt.x - 2, y: tlPt.y + 2), modifierFlags: [],
-            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 59, clickCount: 1, pressure: 1.0
-           ),
-           let tlUp = NSEvent.mouseEvent(
-            with: .leftMouseUp, location: NSPoint(x: tlPt.x - 2, y: tlPt.y + 2), modifierFlags: [],
-            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 60, clickCount: 1, pressure: 1.0
-           ) {
-            let before = vm.annotations.first(where: { $0.id == resizableText.id })?.lineWidth ?? 0
-            canvas.mouseDown(with: tlDown)
-            canvas.mouseDragged(with: tlDrag)
-            canvas.mouseUp(with: tlUp)
-            let after = vm.annotations.first(where: { $0.id == resizableText.id })?.lineWidth ?? 0
-            t.check(
-                after >= before - 0.5,
-                "A tiny outward drag on a .text top-left handle does not abruptly shrink the font",
-                detail: "before=\(before), after=\(after)"
-            )
+        func dragTextTopLeft(by delta: NSPoint, eventBase: Int) -> Bool {
+            guard let tlPt = canvas.selectedAnnotationCornerHandlesInView().first(where: { $0.0 == .topLeft })?.1,
+                  let down = NSEvent.mouseEvent(with: .leftMouseDown, location: tlPt, modifierFlags: [], timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: eventBase, clickCount: 1, pressure: 1.0),
+                  let drag = NSEvent.mouseEvent(with: .leftMouseDragged, location: NSPoint(x: tlPt.x + delta.x, y: tlPt.y + delta.y), modifierFlags: [], timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: eventBase + 1, clickCount: 1, pressure: 1.0),
+                  let up = NSEvent.mouseEvent(with: .leftMouseUp, location: NSPoint(x: tlPt.x + delta.x, y: tlPt.y + delta.y), modifierFlags: [], timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: eventBase + 2, clickCount: 1, pressure: 1.0) else { return false }
+            canvas.mouseDown(with: down)
+            canvas.mouseDragged(with: drag)
+            canvas.mouseUp(with: up)
+            return true
         }
+        let tlRectBefore = vm.annotations.first(where: { $0.id == resizableText.id }).flatMap { canvas.textAnnotationHitRectInView($0) } ?? .zero
+        let tlSizeBefore = vm.annotations.first(where: { $0.id == resizableText.id })?.lineWidth ?? 0
+        t.check(dragTextTopLeft(by: NSPoint(x: -14, y: 10), eventBase: 58), "Constructed top-left text handle outward drag events")
+        let tlItemOut = vm.annotations.first(where: { $0.id == resizableText.id })
+        let tlRectOut = tlItemOut.flatMap { canvas.textAnnotationHitRectInView($0) } ?? .zero
+        t.check(
+            (tlItemOut?.lineWidth ?? 0) > tlSizeBefore + 1.0 &&
+            abs(tlRectOut.maxX - tlRectBefore.maxX) < 4.0 && abs(tlRectOut.minY - tlRectBefore.minY) < 4.0,
+            "Dragging a .text top-left handle outward grows the font while the opposite (bottom-right) corner stays fixed",
+            detail: "size \(tlSizeBefore)->\(tlItemOut?.lineWidth ?? 0), rect \(tlRectBefore)->\(tlRectOut)"
+        )
+        let tlSizeOut = tlItemOut?.lineWidth ?? 0
+        t.check(dragTextTopLeft(by: NSPoint(x: 10, y: -8), eventBase: 61), "Constructed top-left text handle inward drag events")
+        t.check(
+            (vm.annotations.first(where: { $0.id == resizableText.id })?.lineWidth ?? 0) < tlSizeOut - 1.0,
+            "Dragging a .text top-left handle inward shrinks the font"
+        )
         if let brTextPt = canvas.selectedAnnotationCornerHandlesInView().first(where: { $0.0 == .bottomRight })?.1,
            let trDown = NSEvent.mouseEvent(
             with: .leftMouseDown, location: brTextPt, modifierFlags: [],
