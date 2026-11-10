@@ -326,7 +326,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
         let minY = viewPts.map(\.y).min() ?? 0
         let maxY = viewPts.map(\.y).max() ?? 0
         if item.tool == .spotlight {
-            return NSRect(x: minX - 2, y: minY - 2, width: max(12, maxX - minX + 4), height: max(12, maxY - minY + 4))
+            return NSRect(x: minX - 2, y: minY - 2, width: max(4, maxX - minX + 4), height: max(4, maxY - minY + 4))
         }
         let basePad = max(6.0, (item.lineWidth * vm.scale) / 2.0 + 4.0)
         let pad = item.tool == .arrow ? max(basePad, max(12.0, item.lineWidth * 3.4) * vm.scale * 0.5 + 4.0) : basePad
@@ -353,7 +353,9 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
     func hitTestSelectedAnnotationCornerHandle(viewPoint: NSPoint) -> PinSessionViewModel.ResizeHandle? {
         let handles = selectedAnnotationCornerHandlesInView()
         guard !handles.isEmpty else { return nil }
-        let hitRadius: CGFloat = 9.0
+        let spanX = abs((handles.first(where: { $0.0 == .topRight })?.1.x ?? 0) - (handles.first(where: { $0.0 == .topLeft })?.1.x ?? 0))
+        let spanY = abs((handles.first(where: { $0.0 == .topLeft })?.1.y ?? 0) - (handles.first(where: { $0.0 == .bottomLeft })?.1.y ?? 0))
+        let hitRadius: CGFloat = min(9.0, max(3.5, min(spanX, spanY) * 0.28))
         var bestHandle: PinSessionViewModel.ResizeHandle? = nil
         var bestDist: CGFloat = .greatestFiniteMagnitude
         for (handle, pt) in handles {
@@ -427,9 +429,12 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             )
             let outer = rect.insetBy(dx: -tol, dy: -tol)
             guard outer.contains(viewPoint) else { return false }
-            if vm.activeTool != nil && rect.width > tol * 2 && rect.height > tol * 2 {
-                let inner = rect.insetBy(dx: tol, dy: tol)
-                return !inner.contains(viewPoint)
+            if vm.activeTool != nil {
+                let innerTol = min(tol, max(1.5, min(rect.width, rect.height) * 0.25))
+                if rect.width > innerTol * 2 && rect.height > innerTol * 2 {
+                    let inner = rect.insetBy(dx: innerTol, dy: innerTol)
+                    return !inner.contains(viewPoint)
+                }
             }
             return true
         case .arrow:

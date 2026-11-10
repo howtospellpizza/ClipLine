@@ -348,11 +348,17 @@ enum ClipboardHelper {
     }
 
     static func renderTextCardImage(_ rawText: String, scaleFactor: CGFloat = 2.0) -> NSImage? {
-        guard !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        guard let firstNonWS = rawText.firstIndex(where: { !$0.isWhitespace }) else { return nil }
+        let lineStart = rawText[..<firstNonWS].lastIndex(where: { $0.isNewline }).map { rawText.index(after: $0) } ?? rawText.startIndex
+        let leadingIndentCount = rawText.distance(from: lineStart, to: firstNonWS)
+        let effectiveStart = leadingIndentCount > 120
+            ? rawText.index(firstNonWS, offsetBy: -120)
+            : lineStart
+        let trimmedSource = rawText[effectiveStart...]
 
         let maxCharBudget = 8000
-        let didTruncateChars = rawText.count > maxCharBudget
-        let boundedSource = didTruncateChars ? String(rawText.prefix(maxCharBudget)) : rawText
+        let didTruncateChars = trimmedSource.count > maxCharBudget
+        let boundedSource = didTruncateChars ? String(trimmedSource.prefix(maxCharBudget)) : String(trimmedSource)
         let normalized = boundedSource
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")

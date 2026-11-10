@@ -2277,6 +2277,31 @@ func runAllTests() -> Int32 {
         spotVM.annotations.last?.tool == .counter,
         "Clicking inside an existing Spotlight while another tool (.counter) is active creates the new annotation instead of intercepting the click"
     )
+    // Verify a small 12x12pt Spotlight can be dragged from its center when selected (not hijacked by corner resize handles)
+    // and also lets interior clicks pass through when a drawing tool is active
+    let smallSpot = PinAnnotation(
+        tool: .spotlight,
+        color: .red,
+        lineWidth: 1.5,
+        points: [CGPoint(x: 0.40, y: 0.40), CGPoint(x: 0.52, y: 0.52)]
+    )
+    spotVM.annotations = [smallSpot]
+    spotVM.selectedTextAnnotationID = smallSpot.id
+    spotVM.activeTool = nil
+    let smallCenterPt = NSPoint(x: 16 + 46, y: 16 + (100 - 46))
+    if let downDrag = NSEvent.mouseEvent(with: .leftMouseDown, location: smallCenterPt, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 306, clickCount: 1, pressure: 1.0),
+       let moveDrag = NSEvent.mouseEvent(with: .leftMouseDragged, location: NSPoint(x: smallCenterPt.x + 15, y: smallCenterPt.y), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 307, clickCount: 1, pressure: 1.0),
+       let upDrag = NSEvent.mouseEvent(with: .leftMouseUp, location: NSPoint(x: smallCenterPt.x + 15, y: smallCenterPt.y), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 308, clickCount: 1, pressure: 1.0) {
+        spotCanvas.mouseDown(with: downDrag)
+        spotCanvas.mouseDragged(with: moveDrag)
+        spotCanvas.mouseUp(with: upDrag)
+    }
+    let movedPts = spotVM.annotations.first?.points ?? []
+    let movedWidth = movedPts.count >= 2 ? abs(movedPts[1].x - movedPts[0].x) : 0
+    t.check(
+        movedPts.count >= 2 && abs(movedWidth - 0.12) < 0.01 && movedPts[0].x > 0.50,
+        "Dragging the center of a selected 12x12pt Spotlight moves it uniformly instead of triggering a corner resize"
+    )
 
     // Verify Clipboard Text -> Pin card rendering (Retina 2x, warm sticky paper, indentation & CRLF handling) and pinFromClipboard text fallback
     let textPasteboard = NSPasteboard.withUniqueName()
@@ -2298,6 +2323,11 @@ func runAllTests() -> Int32 {
     t.check(
         longLineCard != nil && (longLineCard?.size.height ?? 1000) <= 900.0,
         "renderTextCardImage bounds long wrapped text within 900pt max card height"
+    )
+    let hugeWhitespacePrefixCard = ClipboardHelper.renderTextCardImage(String(repeating: " ", count: 8000) + "hello")
+    t.check(
+        hugeWhitespacePrefixCard != nil,
+        "renderTextCardImage renders valid text even after an 8000-space prefix"
     )
     t.check(
         ClipboardHelper.renderTextCardImage("   \n  ") == nil,
