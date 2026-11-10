@@ -68,6 +68,7 @@ enum L10n {
         case .en:
             switch tool {
             case .rect: return "Rectangle"
+            case .spotlight: return "Spotlight"
             case .arrow: return "Arrow"
             case .pen: return "Pen"
             case .highlighter: return "Highlighter"
@@ -79,6 +80,7 @@ enum L10n {
         case .zhHans:
             switch tool {
             case .rect: return "框选"
+            case .spotlight: return "聚光灯"
             case .arrow: return "箭头"
             case .pen: return "画笔"
             case .highlighter: return "荧光笔"
@@ -348,6 +350,41 @@ enum L10n {
         switch AppLanguage.current {
         case .en: return "Seamlessly stitch selected images vertically into one high-res image and copy"
         case .zhHans: return "将选中的多张图片无缝纵向拼接为一张高清长图并复制"
+        }
+    }
+
+    static var clotheslineStitchHorizontalLabel: String {
+        switch AppLanguage.current {
+        case .en: return "Side"
+        case .zhHans: return "横向拼"
+        }
+    }
+
+    static var clotheslineStitchHorizontalTooltip: String {
+        switch AppLanguage.current {
+        case .en: return "Stitch selected images horizontally side-by-side and copy"
+        case .zhHans: return "将选中的多张图片横向并排拼接为一张并复制"
+        }
+    }
+
+    static var clotheslineFramePaddingLabel: String {
+        switch AppLanguage.current {
+        case .en: return "Frame"
+        case .zhHans: return "加边距"
+        }
+    }
+
+    static var clotheslineFramePaddingTooltip: String {
+        switch AppLanguage.current {
+        case .en: return "Toggle padded background frame for copied / stitched images"
+        case .zhHans: return "切换美化衬底边框与间距（复制或拼图时生效）"
+        }
+    }
+
+    static func toastFramePaddingToggled(enabled: Bool, lang: AppLanguage = .current) -> String {
+        switch lang {
+        case .en: return enabled ? "Frame & padding enabled for copy/stitch" : "Frame & padding off (seamless edge-to-edge)"
+        case .zhHans: return enabled ? "已开启背景边距与阴影（下次复制/拼图生效）" : "已关闭背景边距（恢复无缝紧贴）"
         }
     }
 

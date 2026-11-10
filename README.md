@@ -105,14 +105,14 @@ The screenshot stays pinned at the exact screen coordinates you selected. Before
 
 Press `P` (or click the clothespin icon) to park the current pin on the clothesline at the top of your screen:
 
-- **Batch copy, stitch & save**: Click multiple thumbnails on the line and click **Copy** (or **Save**) to copy or export them as separate images, or click **Stitch** to seamlessly join them vertically into a single Retina-sharp image.
+- **Batch copy, vertical/horizontal stitch, framed padding & save**: Click multiple thumbnails on the line and click **Copy** (or **Save**) to copy or export them as separate images, or click **Stitch** (vertical) / **Side** (horizontal) to join them into a single Retina-sharp image. Toggle **Frame** on the bottom row to add a dark gradient backdrop, rounded corners, drop shadow, and spacing on the next copy or stitch.
 - **Multi-photo drag & drop**: Drag a selected photo to drag **all currently selected photos** together (or drag an unselected photo to drag just that one) directly into Slack, WeChat, a browser, or Finder. Drag the top rope to reposition the clothesline bar.
 - **Unclip**: Double-click any thumbnail to return it to the canvas.
 
 ### 3. Annotate, OCR, QR scan, and translate
 
-- **Tools**: Rectangle (hold `Shift` for 1:1 square), arrow (hold `Shift` to snap `45°` angles), freehand pen, translucent highlighter (`.multiply` blend), auto-incrementing step counter (`① ② ③…`), text, emoji sticker (quick emoji bar + macOS Character Palette `⌃⌘Space`), and mosaic (`CIPixellate`), with 3 stroke sizes (`S` / `M` / `L` or `细` / `中` / `粗`) and 6 colors.
-- **Select, move, resize, recolor & delete annotations**: Click any drawn rectangle, arrow, pen/highlighter stroke, counter badge, text, emoji sticker, or mosaic region to reposition it, change its color/size from the toolbar, drag any of the 4 corner handles on a selected text, emoji, or counter annotation to smoothly scale its size, or press `Delete` / `⌫` to remove it (`⌘Z` undoes any change).
+- **Tools**: Rectangle (hold `Shift` for 1:1 square), spotlight mask (darkens outside the selected region; multiple spotlights share one backdrop), arrow (hold `Shift` to snap `45°` angles), freehand pen, translucent highlighter (`.multiply` blend), auto-incrementing step counter (`① ② ③…`), mosaic (`CIPixellate`), text, and emoji sticker (quick emoji bar + macOS Character Palette `⌃⌘Space`), with 3 stroke sizes (`S` / `M` / `L` or `细` / `中` / `粗`) and 6 colors for applicable tools.
+- **Select, move, resize, recolor & delete annotations**: Click any drawn rectangle, spotlight, arrow, pen/highlighter stroke, counter badge, text, emoji sticker, or mosaic region to reposition it, change its color/size from the toolbar, drag any of the 4 corner handles on a selected spotlight, text, emoji, or counter annotation to smoothly scale its size, or press `Delete` / `⌫` to remove it (`⌘Z` undoes any change).
 - **Text & Emoji Stickers**: Text supports transparent, black pill, or white pill backgrounds; drag anywhere inside the text box to move it, double-click committed text to edit it in place, or drag its 4 corner handles after committing to resize the font smoothly while keeping `S` / `M` / `L` presets available. Emoji stickers can be placed from the toolbar's quick-pick emojis or any character from the macOS Character Palette, then resized directly by dragging their 4 corner handles.
 - **OCR (`O`)**: Recognizes Simplified Chinese, Traditional Chinese, and English offline via macOS `Vision` and copies the text to your clipboard.
 - **QR / Barcode Scan (`Q`)**: Decodes QR codes and barcodes offline via `VNDetectBarcodesRequest`, copies all payloads to your clipboard, and prompts before opening any detected `http`/`https` link.
@@ -128,7 +128,7 @@ Use the full path `~/.local/bin/clipline` unless `~/.local/bin` is in your `PATH
 
 ```bash
 ~/.local/bin/clipline --capture     # start interactive region capture
-~/.local/bin/clipline --clipboard   # pin current clipboard image
+~/.local/bin/clipline --clipboard   # pin current clipboard image (or plain text as a sticky note)
 ~/.local/bin/clipline --settings    # open shortcut settings (starts the daemon if needed)
 ~/.local/bin/clipline --shortcuts   # print current global shortcuts as JSON
 ~/.local/bin/clipline --update      # update the invoked executable from official main
@@ -145,7 +145,7 @@ The table lists factory defaults; use **Keyboard Shortcuts** or `clipline --shor
 | :--- | :--- | :--- |
 | `⌃X` | Global | Capture region |
 | `⌘⇧X` | Global | Capture region (secondary shortcut) |
-| `⌃⌘V` | Global | Pin image from clipboard |
+| `⌃⌘V` | Global | Pin image (or plain text as a sticky note) from clipboard |
 | `Space` / `⌘A` | Capture overlay | Capture full screen immediately |
 | `C` | Capture overlay | Copy hovered pixel `#RRGGBB` HEX color and exit capture |
 | `↩` (`Return`) | Active pin | Copy composited image and close pin |

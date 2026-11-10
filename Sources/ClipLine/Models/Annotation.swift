@@ -121,6 +121,7 @@ struct PinAnnotation: Identifiable {
 
     enum Tool: String, CaseIterable, Identifiable {
         case rect
+        case spotlight
         case arrow
         case pen
         case highlighter
@@ -138,6 +139,7 @@ struct PinAnnotation: Identifiable {
         var icon: String {
             switch self {
             case .rect: return "rectangle"
+            case .spotlight: return "viewfinder.rectangular"
             case .arrow: return "arrow.up.right"
             case .pen: return "scribble"
             case .highlighter: return "highlighter"
@@ -150,7 +152,7 @@ struct PinAnnotation: Identifiable {
 
         var supportsCornerResize: Bool {
             switch self {
-            case .text, .emoji, .counter:
+            case .text, .emoji, .counter, .spotlight:
                 return true
             default:
                 return false

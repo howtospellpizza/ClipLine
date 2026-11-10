@@ -21,6 +21,7 @@ final class ClotheslineManager: ObservableObject {
 
     @Published var items: [ClippedPinItem] = []
     @Published var toastMessage: String? = nil
+    @Published var isFramedPaddingEnabled: Bool = false
 
     private(set) var dockPanel: NSPanel?
 
@@ -138,19 +139,34 @@ final class ClotheslineManager: ObservableObject {
             }
             return
         }
-        let ok = ClipboardHelper.copyImages(chosen.map(\.compositeImage), pasteboard: pasteboardProvider(), tempDir: tempDirOverride)
+        let imagesToCopy: [NSImage]
+        if isFramedPaddingEnabled {
+            imagesToCopy = chosen.map { ClipboardHelper.stitchImagesGrid([$0.compositeImage], padding: 20) }
+        } else {
+            imagesToCopy = chosen.map(\.compositeImage)
+        }
+        let ok = ClipboardHelper.copyImages(imagesToCopy, pasteboard: pasteboardProvider(), tempDir: tempDirOverride)
         if !silent {
             showToast(ok ? L10n.toastCopiedPhotos(chosen.count) : L10n.toastCopyFailed)
         }
     }
 
-    func stitchSelectedToClipboard() {
+    func stitchSelectedToClipboard(axis: StitchAxis = .vertical) {
         let chosen = selectedItems
         guard !chosen.isEmpty else {
             showToast(L10n.toastSelectPhotosToCopy)
             return
         }
-        let ok = ClipboardHelper.copyStitchedImage(chosen.map(\.compositeImage), pasteboard: pasteboardProvider(), tempDir: tempDirOverride)
+        let gap: CGFloat = isFramedPaddingEnabled ? 16 : 0
+        let padding: CGFloat = isFramedPaddingEnabled ? 20 : 0
+        let ok = ClipboardHelper.copyStitchedImage(
+            chosen.map(\.compositeImage),
+            axis: axis,
+            gap: gap,
+            padding: padding,
+            pasteboard: pasteboardProvider(),
+            tempDir: tempDirOverride
+        )
         showToast(ok ? L10n.toastStitchedPhotos(chosen.count) : L10n.toastCopyFailed)
     }
 
@@ -236,7 +252,7 @@ final class ClotheslineManager: ObservableObject {
         let screen = NSScreen.main ?? NSScreen.screens.first
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
 
-        let width = min(max(CGFloat(items.count) * 124 + 265, 450), visible.width - 40)
+        let width = min(max(CGFloat(items.count) * 124 + 335, 510), visible.width - 40)
         let height: CGFloat = 148
         let origin = CGPoint(
             x: visible.midX - width / 2,
@@ -397,12 +413,13 @@ struct ClotheslineBarView: View {
                             .buttonStyle(.plain)
                             .disabled(manager.selectedItems.isEmpty)
                             .help(L10n.clotheslineCopyTooltip)
+                            .fixedSize()
 
                             if manager.selectedItems.count > 1 {
-                                Button(action: { manager.stitchSelectedToClipboard() }) {
+                                Button(action: { manager.stitchSelectedToClipboard(axis: .vertical) }) {
                                     HStack(spacing: 3) {
-                                        Image(systemName: "rectangle.grid.1x2.fill")
-                                            .font(.system(size: 10, weight: .bold))
+                                        Image(systemName: "rectangle.split.1x2.fill")
+                                            .font(.system(size: 10.5, weight: .bold))
                                         Text(L10n.clotheslineStitchLabel)
                                             .font(.system(size: 11, weight: .bold))
                                     }
@@ -414,16 +431,63 @@ struct ClotheslineBarView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .help(L10n.clotheslineStitchTooltip)
+                                .fixedSize()
+
+                                Button(action: { manager.stitchSelectedToClipboard(axis: .horizontal) }) {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "rectangle.split.2x1.fill")
+                                            .font(.system(size: 10.5, weight: .bold))
+                                        Text(L10n.clotheslineStitchHorizontalLabel)
+                                            .font(.system(size: 11, weight: .bold))
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(Color(red: 0.72, green: 0.46, blue: 0.22))
+                                    .foregroundColor(.white)
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .help(L10n.clotheslineStitchHorizontalTooltip)
+                                .fixedSize()
                             }
                         }
 
                         HStack(spacing: 6) {
+                            Button(action: {
+                                manager.isFramedPaddingEnabled.toggle()
+                                manager.showToast(L10n.toastFramePaddingToggled(enabled: manager.isFramedPaddingEnabled))
+                            }) {
+                                HStack(spacing: 3) {
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                            .stroke(manager.isFramedPaddingEnabled ? Color.white : Color.primary.opacity(0.8), lineWidth: 1.1)
+                                            .frame(width: 11, height: 9)
+                                        RoundedRectangle(cornerRadius: 1, style: .continuous)
+                                            .fill(manager.isFramedPaddingEnabled ? Color.white : Color.primary.opacity(0.75))
+                                            .frame(width: 6, height: 4.5)
+                                    }
+                                    Text(L10n.clotheslineFramePaddingLabel)
+                                        .font(.system(size: 10, weight: .semibold))
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(manager.isFramedPaddingEnabled ? Color.accentColor : Color.primary.opacity(0.12))
+                                .foregroundColor(manager.isFramedPaddingEnabled ? .white : .primary.opacity(0.88))
+                                .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .help(L10n.clotheslineFramePaddingTooltip)
+                            .fixedSize()
+
+                            Text("·").foregroundColor(.secondary)
+
                             Button(action: { manager.toggleSelectAll() }) {
                                 Text(L10n.clotheslineSelectAllLabel(allSelected: manager.items.allSatisfy(\.isSelected)))
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundColor(.primary.opacity(0.85))
                             }
                             .buttonStyle(.plain)
+                            .fixedSize()
 
                             Text("·").foregroundColor(.secondary)
 

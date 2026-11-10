@@ -273,10 +273,20 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
         isCapturing = false
     }
 
-    func pinFromClipboard() {
-        if let img = NSImage(pasteboard: NSPasteboard.general) {
+    @discardableResult
+    func pinFromClipboard(pasteboard: NSPasteboard = .general) -> Bool {
+        if let img = NSImage(pasteboard: pasteboard),
+           img.size.width >= 1,
+           img.size.height >= 1 {
             createPinWindow(with: img)
+            return true
         }
+        if let text = pasteboard.string(forType: .string),
+           let cardImg = ClipboardHelper.renderTextCardImage(text) {
+            createPinWindow(with: cardImg)
+            return true
+        }
+        return false
     }
 
     func createPinWindow(fromCapture res: CaptureSelectionResult) {

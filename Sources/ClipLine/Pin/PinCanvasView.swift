@@ -116,9 +116,9 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
            let idx = vm.annotations.firstIndex(where: { $0.id == selID }) {
             let current = vm.annotations[idx]
             let tool = current.tool
-            let nextColor = (updateColor && tool != .mosaic && tool != .emoji) ? NSColor(vm.selectedColor) : current.color
+            let nextColor = (updateColor && tool != .mosaic && tool != .emoji && tool != .spotlight) ? NSColor(vm.selectedColor) : current.color
             let nextWidth: CGFloat = {
-                guard updatePreset && tool != .emoji else { return current.lineWidth }
+                guard updatePreset && tool != .emoji && tool != .spotlight else { return current.lineWidth }
                 return PinSessionViewModel.presetLineWidth(vm.strokePreset, for: tool)
             }()
             let nextBg: TextBackgroundStyle = (updateBackground && tool == .text) ? vm.textBackgroundStyle : current.textBackgroundStyle
@@ -325,6 +325,9 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
         let maxX = viewPts.map(\.x).max() ?? 0
         let minY = viewPts.map(\.y).min() ?? 0
         let maxY = viewPts.map(\.y).max() ?? 0
+        if item.tool == .spotlight {
+            return NSRect(x: minX - 2, y: minY - 2, width: max(12, maxX - minX + 4), height: max(12, maxY - minY + 4))
+        }
         let basePad = max(6.0, (item.lineWidth * vm.scale) / 2.0 + 4.0)
         let pad = item.tool == .arrow ? max(basePad, max(12.0, item.lineWidth * 3.4) * vm.scale * 0.5 + 4.0) : basePad
         return NSRect(x: minX - pad, y: minY - pad, width: max(12, maxX - minX + pad * 2), height: max(12, maxY - minY + pad * 2))
@@ -409,6 +412,22 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             let outer = rect.insetBy(dx: -tol, dy: -tol)
             guard outer.contains(viewPoint) else { return false }
             if rect.width > tol * 2 && rect.height > tol * 2 {
+                let inner = rect.insetBy(dx: tol, dy: tol)
+                return !inner.contains(viewPoint)
+            }
+            return true
+        case .spotlight:
+            let p0 = viewPts[0]
+            let p1 = viewPts[viewPts.count - 1]
+            let rect = NSRect(
+                x: min(p0.x, p1.x),
+                y: min(p0.y, p1.y),
+                width: abs(p1.x - p0.x),
+                height: abs(p1.y - p0.y)
+            )
+            let outer = rect.insetBy(dx: -tol, dy: -tol)
+            guard outer.contains(viewPoint) else { return false }
+            if vm.activeTool != nil && rect.width > tol * 2 && rect.height > tol * 2 {
                 let inner = rect.insetBy(dx: tol, dy: tol)
                 return !inner.contains(viewPoint)
             }
@@ -636,8 +655,8 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             let insetRect = hitRect.insetBy(dx: 2, dy: 2)
             let anchorPt: NSPoint
             annotationResizeStartPoints = selItem.points
-            if selItem.tool == .text {
-                // Opposite corner of the dragged handle stays fixed while the text scales around it
+            if selItem.tool == .text || selItem.tool == .spotlight {
+                // Opposite corner of the dragged handle stays fixed while the annotation scales around it
                 anchorPt = NSPoint(
                     x: (cornerHandle == .topLeft || cornerHandle == .bottomLeft) ? insetRect.maxX : insetRect.minX,
                     y: (cornerHandle == .topLeft || cornerHandle == .topRight) ? insetRect.minY : insetRect.maxY
@@ -816,9 +835,32 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
                 return
             }
             let pt = convert(event.locationInWindow, from: nil)
+            let tool = vm.annotations[idx].tool
+            if tool == .spotlight {
+                let img = imageRectInView
+                let anchorNorm = CGPoint(
+                    x: max(0, min(1, (annotationResizeAnchorViewPoint.x - img.minX) / max(1, img.width))),
+                    y: max(0, min(1, (img.maxY - annotationResizeAnchorViewPoint.y) / max(1, img.height)))
+                )
+                let curNorm = CGPoint(
+                    x: max(0, min(1, (pt.x - img.minX) / max(1, img.width))),
+                    y: max(0, min(1, (img.maxY - pt.y) / max(1, img.height)))
+                )
+                let spanW = abs(curNorm.x - anchorNorm.x) * img.width
+                let spanH = abs(curNorm.y - anchorNorm.y) * img.height
+                if spanW >= 6.0 && spanH >= 6.0 {
+                    if !annotationResizeDidChange {
+                        vm.recordUndoSnapshot()
+                        annotationResizeDidChange = true
+                    }
+                    vm.annotations[idx].points = [anchorNorm, curNorm]
+                    needsDisplay = true
+                }
+                cornerHandle.cursor.set()
+                return
+            }
             let currentDist = max(6.0, hypot(pt.x - annotationResizeAnchorViewPoint.x, pt.y - annotationResizeAnchorViewPoint.y))
             let ratio = currentDist / max(12.0, annotationResizeStartDistance)
-            let tool = vm.annotations[idx].tool
             let nextWidth = PinSessionViewModel.clampedAnnotationLineWidth(annotationResizeStartLineWidth * ratio, for: tool)
             if abs(nextWidth - vm.annotations[idx].lineWidth) > 0.05 {
                 if !annotationResizeDidChange {
@@ -890,7 +932,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             let rawNormPt = CGPoint(x: nx, y: ny)
             let isShiftPressed = event.modifierFlags.contains(.shift)
 
-            if tool == .rect || tool == .arrow {
+            if tool == .rect || tool == .spotlight || tool == .arrow {
                 let startNormPt = vm.currentDragPoints[0]
                 let endNormPt = isShiftPressed
                     ? PinSessionViewModel.constrainedNormalizedEndPoint(
@@ -954,7 +996,14 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
         }
 
         if let tool = vm.activeTool, tool != .text, tool != .counter, tool != .emoji, !vm.currentDragPoints.isEmpty {
-            if vm.currentDragPoints.count >= 2 {
+            let imgRect = imageRectInView
+            let isTooSmallSpotlight: Bool = {
+                guard tool == .spotlight, let p0 = vm.currentDragPoints.first, let p1 = vm.currentDragPoints.last else {
+                    return false
+                }
+                return abs(p1.x - p0.x) * imgRect.width < 6.0 || abs(p1.y - p0.y) * imgRect.height < 6.0
+            }()
+            if vm.currentDragPoints.count >= 2 && !isTooSmallSpotlight {
                 vm.recordUndoSnapshot()
                 let created = PinAnnotation(
                     tool: tool,
@@ -1087,17 +1136,28 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
         ctx.translateBy(x: imgRect.minX, y: imgRect.maxY)
         ctx.scaleBy(x: 1.0, y: -1.0)
 
-        for item in vm.annotations where item.id != vm.editingExistingTextAnnotationID {
-            vm.drawAnnotationInCGContext(item, ctx: ctx, size: imgRect.size, scaleMultiplier: vm.scale)
-        }
+        var allToDraw = vm.annotations.filter { $0.id != vm.editingExistingTextAnnotationID }
         if let tool = vm.activeTool, !vm.currentDragPoints.isEmpty {
-            let temp = PinAnnotation(
-                tool: tool,
-                color: NSColor(vm.selectedColor),
-                lineWidth: vm.currentToolLineWidth,
-                points: vm.currentDragPoints
-            )
-            vm.drawAnnotationInCGContext(temp, ctx: ctx, size: imgRect.size, scaleMultiplier: vm.scale)
+            let isTooSmallSpotlight: Bool = {
+                guard tool == .spotlight, let p0 = vm.currentDragPoints.first, let p1 = vm.currentDragPoints.last else {
+                    return false
+                }
+                return abs(p1.x - p0.x) * imgRect.width < 6.0 || abs(p1.y - p0.y) * imgRect.height < 6.0
+            }()
+            if !isTooSmallSpotlight {
+                allToDraw.append(
+                    PinAnnotation(
+                        tool: tool,
+                        color: NSColor(vm.selectedColor),
+                        lineWidth: vm.currentToolLineWidth,
+                        points: vm.currentDragPoints
+                    )
+                )
+            }
+        }
+        vm.drawSpotlightMaskIfNeeded(for: allToDraw, ctx: ctx, size: imgRect.size, scaleMultiplier: vm.scale)
+        for item in allToDraw {
+            vm.drawAnnotationInCGContext(item, ctx: ctx, size: imgRect.size, scaleMultiplier: vm.scale, includeSpotlightBackdrop: false)
         }
         ctx.restoreGState()
 

@@ -1934,7 +1934,7 @@ func runAllTests() -> Int32 {
         )
         vm.annotations.append(resizableText)
         vm.selectedTextAnnotationID = resizableText.id
-        let textHandles = canvas.selectedAnnotationCornerHandlesInView()
+        _ = canvas.selectedAnnotationCornerHandlesInView()
         func dragTextTopLeft(by delta: NSPoint, eventBase: Int) -> Bool {
             guard let tlPt = canvas.selectedAnnotationCornerHandlesInView().first(where: { $0.0 == .topLeft })?.1,
                   let down = NSEvent.mouseEvent(with: .leftMouseDown, location: tlPt, modifierFlags: [], timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: eventBase, clickCount: 1, pressure: 1.0),
@@ -2177,6 +2177,141 @@ func runAllTests() -> Int32 {
         copiedStitched && (testPasteboard.pasteboardItems?.count == 1),
         "copyStitchedImage writes 1 combined stitched NSPasteboardItem to pasteboard"
     )
+
+    // Verify horizontal side-by-side stitch and padded frame background
+    let stitchedHoriz = ClipboardHelper.stitchImagesGrid([img1, img2], axis: .horizontal, gap: 16, padding: 20)
+    t.check(
+        stitchedHoriz.size == NSSize(width: 200 + 240 + 16 + 40, height: max(80, 60) + 40),
+        "stitchImagesGrid stitches horizontally with gap and outer padding (width = 496, height = 120)",
+        detail: "got \(stitchedHoriz.size)"
+    )
+
+    let singleFramed = ClipboardHelper.stitchImagesGrid([img1], padding: 20)
+    t.check(
+        singleFramed.size == NSSize(width: 240, height: 100),
+        "stitchImagesGrid applies outer frame padding even to a single image when padding > 0",
+        detail: "got \(singleFramed.size)"
+    )
+
+    // Verify Spotlight annotation tool darkens pixels outside spotlight rect while keeping inside bright,
+    // and multiple spotlights do not compound exterior darkness
+    let whiteImg = NSImage(size: NSSize(width: 100, height: 100))
+    whiteImg.lockFocus()
+    NSColor.white.setFill()
+    NSRect(x: 0, y: 0, width: 100, height: 100).fill()
+    whiteImg.unlockFocus()
+    let spotVM = PinSessionViewModel(image: whiteImg)
+    spotVM.annotations.append(
+        PinAnnotation(
+            tool: .spotlight,
+            color: .red,
+            lineWidth: 2.0,
+            points: [CGPoint(x: 0.15, y: 0.15), CGPoint(x: 0.42, y: 0.42)]
+        )
+    )
+    var singleOutsideLuma: CGFloat = 1
+    if let spotRendered = spotVM.renderCompositeImage(),
+       let spotTiff = spotRendered.tiffRepresentation,
+       let spotRep = NSBitmapImageRep(data: spotTiff) {
+        let insideColor = spotRep.colorAt(x: Int(Double(spotRep.pixelsWide) * 0.28), y: Int(Double(spotRep.pixelsHigh) * 0.28))?.usingColorSpace(.sRGB)
+        let outsideColor = spotRep.colorAt(x: 5, y: 5)?.usingColorSpace(.sRGB)
+        let insideLuma = insideColor.map { 0.299 * $0.redComponent + 0.587 * $0.greenComponent + 0.114 * $0.blueComponent } ?? 0
+        let outsideLuma = outsideColor.map { 0.299 * $0.redComponent + 0.587 * $0.greenComponent + 0.114 * $0.blueComponent } ?? 1
+        singleOutsideLuma = outsideLuma
+        t.check(
+            insideLuma > 0.90 && outsideLuma < 0.60,
+            "Spotlight annotation keeps interior bright (\(String(format: "%.2f", insideLuma))) while darkening exterior (\(String(format: "%.2f", outsideLuma)))"
+        )
+    } else {
+        t.check(false, "Rendered composite image for Spotlight annotation verification")
+    }
+    spotVM.annotations.append(
+        PinAnnotation(
+            tool: .spotlight,
+            color: .red,
+            lineWidth: 2.0,
+            points: [CGPoint(x: 0.60, y: 0.60), CGPoint(x: 0.85, y: 0.85)]
+        )
+    )
+    if let multiRendered = spotVM.renderCompositeImage(),
+       let multiTiff = multiRendered.tiffRepresentation,
+       let multiRep = NSBitmapImageRep(data: multiTiff),
+       let outside2Color = multiRep.colorAt(x: 5, y: 5)?.usingColorSpace(.sRGB),
+       let firstHoleColor = multiRep.colorAt(x: Int(Double(multiRep.pixelsWide) * 0.28), y: Int(Double(multiRep.pixelsHigh) * 0.28))?.usingColorSpace(.sRGB),
+       let secondHoleColor = multiRep.colorAt(x: Int(Double(multiRep.pixelsWide) * 0.72), y: Int(Double(multiRep.pixelsHigh) * 0.72))?.usingColorSpace(.sRGB) {
+        let outside2Luma = 0.299 * outside2Color.redComponent + 0.587 * outside2Color.greenComponent + 0.114 * outside2Color.blueComponent
+        let firstHoleLuma = 0.299 * firstHoleColor.redComponent + 0.587 * firstHoleColor.greenComponent + 0.114 * firstHoleColor.blueComponent
+        let secondHoleLuma = 0.299 * secondHoleColor.redComponent + 0.587 * secondHoleColor.greenComponent + 0.114 * secondHoleColor.blueComponent
+        t.check(
+            abs(outside2Luma - singleOutsideLuma) < 0.02 && firstHoleLuma > 0.90 && secondHoleLuma > 0.90,
+            "Multiple spotlight annotations share a single backdrop mask while keeping every spotlight hole bright"
+        )
+    } else {
+        t.check(false, "Multiple spotlight annotations share a single backdrop mask")
+    }
+
+    // Verify Spotlight rejects 1D zero-height drag and allows drawing inside an existing Spotlight when a tool is active
+    let spotCanvas = PinCanvasNSView(frame: NSRect(x: 0, y: 0, width: 132, height: 132), vm: spotVM)
+    let countBefore1D = spotVM.annotations.count
+    spotVM.activeTool = .spotlight
+    if let down1D = NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 24, y: 24), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 301, clickCount: 1, pressure: 1.0),
+       let drag1D = NSEvent.mouseEvent(with: .leftMouseDragged, location: NSPoint(x: 84, y: 24), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 302, clickCount: 1, pressure: 1.0),
+       let up1D = NSEvent.mouseEvent(with: .leftMouseUp, location: NSPoint(x: 84, y: 24), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 303, clickCount: 1, pressure: 1.0) {
+        spotCanvas.mouseDown(with: down1D)
+        spotCanvas.mouseDragged(with: drag1D)
+        spotCanvas.mouseUp(with: up1D)
+    }
+    t.check(
+        spotVM.annotations.count == countBefore1D,
+        "Spotlight rejects zero-height horizontal drag instead of committing a full-screen dark mask"
+    )
+    // Clicking inside the first spotlight hole while .counter tool is active places a counter instead of dragging the spotlight
+    spotVM.activeTool = .counter
+    let holeViewPt = NSPoint(x: 16 + 28, y: 16 + 72)
+    if let downInside = NSEvent.mouseEvent(with: .leftMouseDown, location: holeViewPt, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 304, clickCount: 1, pressure: 1.0),
+       let upInside = NSEvent.mouseEvent(with: .leftMouseUp, location: holeViewPt, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 305, clickCount: 1, pressure: 1.0) {
+        spotCanvas.mouseDown(with: downInside)
+        spotCanvas.mouseUp(with: upInside)
+    }
+    t.check(
+        spotVM.annotations.last?.tool == .counter,
+        "Clicking inside an existing Spotlight while another tool (.counter) is active creates the new annotation instead of intercepting the click"
+    )
+
+    // Verify Clipboard Text -> Pin card rendering (Retina 2x, warm sticky paper, indentation & CRLF handling) and pinFromClipboard text fallback
+    let textPasteboard = NSPasteboard.withUniqueName()
+    textPasteboard.clearContents()
+    textPasteboard.setString("    let x = 1\r\nmake test", forType: .string)
+    let cardImage = ClipboardHelper.renderTextCardImage("    let x = 1\r\nmake test")
+    let cardRep = cardImage?.representations.compactMap { $0 as? NSBitmapImageRep }.first
+    let paperColor = cardRep?.colorAt(x: 10, y: 30)?.usingColorSpace(.sRGB)
+    let isWarmYellowPaper = (paperColor?.redComponent ?? 0) > 0.85 && (paperColor?.greenComponent ?? 0) > 0.75 && (paperColor?.blueComponent ?? 1) < 0.80
+    t.check(
+        cardImage != nil &&
+        (cardImage?.size.width ?? 0) >= 180 &&
+        (cardImage?.size.height ?? 0) >= 76 &&
+        cardRep?.pixelsWide == Int((cardImage?.size.width ?? 0) * 2) &&
+        isWarmYellowPaper,
+        "renderTextCardImage renders non-empty clipboard text into a 2x Retina warm-yellow sticky note image"
+    )
+    let longLineCard = ClipboardHelper.renderTextCardImage(String(repeating: "long_line_segment_", count: 300))
+    t.check(
+        longLineCard != nil && (longLineCard?.size.height ?? 1000) <= 900.0,
+        "renderTextCardImage bounds long wrapped text within 900pt max card height"
+    )
+    t.check(
+        ClipboardHelper.renderTextCardImage("   \n  ") == nil,
+        "renderTextCardImage returns nil for whitespace-only text"
+    )
+    let panelsBeforeTextPin = daemon.activePanels.count
+    let didPinText = daemon.pinFromClipboard(pasteboard: textPasteboard)
+    t.check(
+        didPinText && daemon.activePanels.count == panelsBeforeTextPin + 1,
+        "pinFromClipboard creates a floating Pin window when pasteboard contains plain text"
+    )
+    for panel in Array(daemon.activePanels.values) {
+        panel.onClosePanel?()
+    }
 
     let staleClipURL = testTempDirURL.appendingPathComponent("ClipLine_StaleTest.png")
     let unrelatedURL = testTempDirURL.appendingPathComponent("user_notes.txt")

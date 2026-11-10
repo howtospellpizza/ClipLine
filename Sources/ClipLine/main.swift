@@ -75,7 +75,7 @@ if args.count >= 2 {
         Usage: clipline [options]
           (no args)        Start ClipLine background daemon (or trigger capture if already running)
           -i, --capture    Trigger interactive region capture + Pin on screen
-          -c, --clipboard  Pin current clipboard image on screen
+          -c, --clipboard  Pin current clipboard image or text card on screen
           --settings       Open keyboard shortcut settings (starts the daemon if needed)
           --shortcuts      Print current global shortcuts as JSON
           --update         Download, build, and install the latest official version
