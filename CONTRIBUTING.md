@@ -52,4 +52,8 @@ Thank you for contributing to **ClipLine**! ClipLine is a native, zero-dependenc
 - Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `test:`, `chore:`) so release notes can be generated automatically.
 - Ensure `make build`, `make test`, and `make test-install` pass before opening a PR.
 - Keep `README.md` and `README.zh-CN.md` synchronized when adding user-facing flags, shortcuts, or tools.
-- Releases are lightweight (version bump in `VERSION` + `CHANGELOG.md` + Git tag & GitHub Release); ClipLine installs directly as a CLI binary via `make install` / `clipline --update` without `.app` or `.dmg` bundle overhead.
+- Releases are lightweight (version bump in `VERSION` + `CHANGELOG.md` + Git tag & GitHub Release via `.github/workflows/release.yml`):
+  1. Trigger the **Release** workflow manually (`patch` / `minor` / `major`) to open a `chore/release-vX.Y.Z` pull request.
+  2. Click **Approve workflows to run** on the bot-created PR if GitHub prompts, then merge after `CI` passes.
+  3. Merging into `main` triggers the `CI` push run, and upon `CI` completion the **Release** workflow automatically tags `vX.Y.Z` and publishes the GitHub Release.
+  4. ClipLine installs directly as a CLI binary via `make install` / `clipline --update` without `.app` or `.dmg` bundle overhead.

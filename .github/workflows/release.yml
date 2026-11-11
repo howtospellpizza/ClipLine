@@ -67,17 +67,22 @@ jobs:
           fi
           if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
             git fetch origin "$branch"
-            branch_ver=$(git show "origin/${branch}:VERSION" 2>/dev/null | tr -d '[:space:]' || true)
+            branch_ver=$(git show "FETCH_HEAD:VERSION" 2>/dev/null | tr -d '[:space:]' || true)
             if [ "$branch_ver" != "$next" ]; then
               echo "Error: Remote branch $branch exists with VERSION='${branch_ver}' (expected '${next}'). Reconcile or delete the stale branch first." >&2
               exit 1
+            fi
+            if [ "$pr_state" = "CLOSED" ]; then
+              echo "Reopening closed release PR for $branch."
+              gh pr reopen "$branch"
+              exit 0
             fi
             echo "Remote branch $branch already exists without an open PR; opening PR from existing branch."
             gh pr create \
               --base main \
               --head "$branch" \
               --title "chore(release): v${next}" \
-              --body "Automated version bump and changelog update for **v${next}**. Merging this PR after CI passes will automatically tag and publish the GitHub Release."
+              --body "Automated version bump and changelog update for **v${next}**. Approve workflows on this PR if prompted, then merge after CI passes to automatically tag and publish the GitHub Release."
             exit 0
           fi
 
@@ -127,7 +132,7 @@ jobs:
             --base main \
             --head "$branch" \
             --title "chore(release): v${next}" \
-            --body "Automated version bump and changelog update for **v${next}**. Merging this PR after CI passes will automatically tag and publish the GitHub Release."
+            --body "Automated version bump and changelog update for **v${next}**. Approve workflows on this PR if prompted, then merge after CI passes to automatically tag and publish the GitHub Release."
 
   publish-release:
     if: >-
@@ -141,7 +146,6 @@ jobs:
     permissions:
       contents: write
       actions: read
-      checks: read
     steps:
       - name: Checkout verified main commit
         uses: actions/checkout@v4

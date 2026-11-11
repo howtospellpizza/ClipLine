@@ -55,7 +55,7 @@ func runSuite9VersionAndDiagnosticsTests(_ t: TestHarness, testPasteboard: NSPas
     )
 
         // 2. Verify oversized single event (including multi-byte UTF-8) is truncated safely within maxBytes
-        let oversizedMessage = String(repeating: "🔥截屏", count: 400)
+        let oversizedMessage = "utf8_trunc_marker_" + String(repeating: "🔥截屏", count: 400)
         DiagnosticsService.recordEvent(
             category: "probe",
             message: oversizedMessage,
@@ -65,7 +65,8 @@ func runSuite9VersionAndDiagnosticsTests(_ t: TestHarness, testPasteboard: NSPas
         let bytesAfterOversized = (try? FileManager.default.attributesOfItem(atPath: logFileURL.path)[.size] as? NSNumber)?.intValue ?? Int.max
         let linesAfterOversized = DiagnosticsService.readRecentLogLines(limit: 5, logFileURL: logFileURL)
         t.check(
-            bytesAfterOversized <= 256 && linesAfterOversized.last?.contains("[probe]") == true,
+            bytesAfterOversized <= 256 &&
+            linesAfterOversized.last?.contains("utf8_trunc_marker_🔥截屏") == true,
             "DiagnosticsService.recordEvent truncates oversized multi-byte UTF-8 event within maxBytes (\(bytesAfterOversized)B <= 256B)"
         )
 
