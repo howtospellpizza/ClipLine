@@ -18,6 +18,149 @@ Capture screenshots, annotate them, and clip them to a floating clothesline at t
        └──────┘       └──────┘       └──────┘
 ```
 
+## Table of Contents
+
+- [Core Features & Visual Tour](#core-features--visual-tour)
+  - [1. Capture, Window Snap, HEX Color Picker & Crop Adjustment](#1-capture-window-snap-hex-color-picker--crop-adjustment)
+  - [2. Pin Canvas & 9 Annotation Tools](#2-pin-canvas--9-annotation-tools)
+  - [3. Offline OCR, QR/Barcode Auto-Copy & Translation](#3-offline-ocr-qrbarcode-auto-copy--translation)
+  - [4. Top Clothesline: Park, Multi-Photo Drag, Vertical/Horizontal Stitch & Frame](#4-top-clothesline-park-multi-photo-drag-verticalhorizontal-stitch--frame)
+  - [5. Pin Clipboard Image or Plain Text as a Sticky Note (`⌃⌘V`)](#5-pin-clipboard-image-or-plain-text-as-a-sticky-note-v)
+- [Installation & Quickstart](#installation--quickstart)
+  - [Install from Source](#install-from-source)
+  - [Install with an AI Coding Agent](#install-with-an-ai-coding-agent)
+  - [Update & Reinstall](#update--reinstall)
+  - [Uninstall](#uninstall)
+- [CLI & Keyboard Shortcuts](#cli--keyboard-shortcuts)
+- [Permissions, Configuration & Privacy](#permissions-configuration--privacy)
+- [Development](#development)
+
+---
+
+## Core Features & Visual Tour
+
+### 1. Capture, Window Snap, HEX Color Picker & Crop Adjustment
+
+Use the global capture shortcut (factory default `⌃X`, secondary `⌘⇧X`):
+
+- **Single-click window snap**: Hover over any visible window (including Stage Manager thumbnails) to preview its bounds, then **single-click** to capture that exact window in one step.
+- **Freehand drag & full-screen capture**: Click and drag anywhere to select a custom region, or press `Space` / `⌘A` inside the capture overlay to capture the entire screen immediately.
+- **Magnifier & HEX color picker**: Hover to inspect pixel coordinates and the `8×` magnifier loupe; press `C` during capture to copy the hovered pixel's `#RRGGBB` HEX color and exit capture, or customize crosshair style (`Full-Screen Lines`, `Corner Bracket`, `Precision Dot`) and color in **Keyboard Shortcuts** (`⌘,`).
+- **Non-destructive crop adjustment**: Before moving the pin or selecting a drawing tool (at `100%` zoom), drag any of the 8 handles or 4 edges to expand or shrink the crop against the original full-screen frame.
+
+<details>
+<summary>🎬 <b>Watch demo: Single-click window snap, 8× HEX loupe & edge crop adjustment</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-capture-snap.gif" alt="Single-click window snap, HEX color loupe, and non-destructive crop resize" width="760">
+</p>
+</details>
+
+---
+
+### 2. Pin Canvas & 9 Annotation Tools
+
+Every captured screenshot stays pinned at its exact screen coordinates. Use the floating toolbar below the pin to annotate, move, scale, or recolor any element (`⌘Z` undoes any step):
+
+| Tool | Highlights |
+| :--- | :--- |
+| **Rectangle & Arrow** | Hold `Shift` to lock a `1:1` square or snap arrows to `45°` increments; 3 stroke sizes (`S` / `M` / `L`) and 6 colors. |
+| **Spotlight (`viewfinder.rectangular`)** | Drag across a focus area to dim everything outside it (`56%` dark mask with crisp white border). Multiple spotlights share one unified backdrop; click a spotlight and drag any of its **4 corner handles** to resize. |
+| **Pen & Highlighter** | Smooth freehand drawing and translucent `.multiply`-blend highlighter that never obscures underlying text. |
+| **Step Counter (`① ② ③…`)** | Auto-incrementing numbered badges; drag any of the 4 corner handles on a selected badge to scale it smoothly. |
+| **Mosaic (`CIPixellate`)** | Pixelates sensitive areas in place. |
+| **Text (`Aa`)** | Supports transparent, black pill, or white pill backgrounds; double-click committed text to edit in place, or drag its 4 corner handles to scale font size smoothly. |
+| **Emoji Sticker (`😊`)** | One-click quick emoji bar plus macOS Character Palette (`⌃⌘Space`); drag the 4 corner handles to scale any placed sticker. |
+
+<details open>
+<summary>🎬 <b>Watch demo: Spotlight focus mask & 4-corner resize handles</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-spotlight.gif" alt="Spotlight annotation dims everything outside the selected area" width="760">
+</p>
+</details>
+
+<details>
+<summary>🎬 <b>Watch demo: Mosaic redaction & multiply-blend highlighter</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-mosaic-highlight.gif" alt="Mosaic pixelation and translucent highlighter" width="760">
+</p>
+</details>
+
+<details>
+<summary>🎬 <b>Watch demo: Quick emoji stickers, Character Palette & corner scaling</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-emoji-stickers.gif" alt="Emoji stickers and 4-corner handle resizing" width="760">
+</p>
+</details>
+
+---
+
+### 3. Offline OCR, QR/Barcode Auto-Copy & Translation
+
+- **Offline OCR (`O`)**: Recognizes Simplified Chinese, Traditional Chinese, and English offline via macOS `Vision` and copies the extracted text directly to your clipboard.
+- **QR / Barcode Scan (`Q`)**: Decodes QR codes and barcodes offline via `VNDetectBarcodesRequest`, **immediately copies all decoded payloads to your clipboard**, and prompts (`Keep Copied Only` / `Open in Browser`) before opening any detected `http`/`https` link.
+- **Translate (`T`)**: Runs OCR on the composited image and routes text to:
+  1. Local translation daemon (`gloss-daemon`, or custom name via `CLIP_LINE_TRANSLATE_DAEMON`)
+  2. Custom URL template (`CLIP_LINE_TRANSLATE_URL`)
+  3. macOS system Translation service
+  4. Browser translation (prompts once per destination domain before opening)
+
+<details open>
+<summary>🎬 <b>Watch demo: Step counters, callouts & QR code auto-copied to clipboard</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-annotate-qr.gif" alt="Step counters, rectangle callout, and offline QR scan auto-copied to clipboard" width="760">
+</p>
+</details>
+
+---
+
+### 4. Top Clothesline: Park, Multi-Photo Drag, Vertical/Horizontal Stitch & Frame
+
+Press `P` / `Tab` (or click **Clip**) to hang the current pin on the floating clothesline at the top of your screen (double-click any thumbnail to unclip it back to the canvas):
+
+- **Multi-photo drag & drop**: Drag a selected thumbnail to drag **all currently selected photos** together (or drag an unselected thumbnail to export just that one) directly into Slack, WeChat, a browser, or Finder. Drag the top rope to reposition the clothesline bar.
+- **Batch Copy, Vertical Stitch (`Stitch`) & Horizontal Stitch (`Side`)**: Select 2+ thumbnails and click **Copy** (or **Save**) to export them separately, **Stitch** to combine them top-to-bottom, or **Side** to combine them left-to-right into a single Retina-sharp image.
+- **Framed backdrop (`Frame`)**: Toggle **Frame** on the bottom row of the clothesline controls to wrap the next copied or stitched image in a dark gradient card with rounded corners, inner item shadows, and even spacing.
+
+<details>
+<summary>🎬 <b>Watch demo: Park pins on the clothesline & drag multiple photos into Slack</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-clothesline-drag.gif" alt="Park pins on the clothesline and drag multiple photos into Slack" width="760">
+</p>
+</details>
+
+<details open>
+<summary>🎬 <b>Watch demo: Vertical Stitch, horizontal Side stitch & Framed padding</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-clothesline-stitch.gif" alt="Vertical stitch, horizontal Side stitch, and Framed padding on the clothesline" width="760">
+</p>
+</details>
+
+---
+
+### 5. Pin Clipboard Image or Plain Text as a Sticky Note (`⌃⌘V`)
+
+Press `⌃⌘V` (or run `~/.local/bin/clipline --clipboard`):
+
+- **If the clipboard contains an image**: Pins the image directly on screen.
+- **If the clipboard contains plain text or code**: Renders the copied text into a Retina **yellow sticky note Pin** (up to 60 lines with automatic truncation indicator), complete with the full annotation toolbar, OCR/translation, and clothesline parking.
+
+<details open>
+<summary>🎬 <b>Watch demo: Copy text (<code>⌘C</code>) → press <code>⌃⌘V</code> to pin as an annotatable sticky note</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-clipboard-text.gif" alt="Copy plain text with Cmd+C and pin as a sticky note with Ctrl+Cmd+V" width="760">
+</p>
+</details>
+
+---
+
 ## Installation & Quickstart
 
 ### Prerequisites
@@ -36,7 +179,7 @@ nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
 
 > **Note**: This starts `clipline` in the background for the current session. It does not automatically register a login item or guarantee launch on system startup.
 
-Click the keyboard icon (`⌨️`) on any pin toolbar (or press `⌘,` on a pin window, or run `~/.local/bin/clipline --settings`) to view or edit all global shortcuts. Factory defaults: `⌃X` captures a region, `⌘⇧X` is the secondary capture shortcut, and `⌃⌘V` pins the clipboard image.
+Click the keyboard icon (`⌨️`) on any pin toolbar (or press `⌘,` on a pin window, or run `~/.local/bin/clipline --settings`) to view or edit all global shortcuts. Factory defaults: `⌃X` captures a region, `⌘⇧X` is the secondary capture shortcut, and `⌃⌘V` pins the clipboard image or plain text.
 
 ### Install with an AI Coding Agent
 
@@ -89,46 +232,17 @@ make uninstall
 - Unsaved active pins and images parked on the clothesline are lost; PNGs already saved to disk are not removed.
 - Preserves preferences (`defaults`) and macOS TCC permission entries.
 
-## Usage
+---
 
-### 1. Capture, window snap, HEX color picker, and adjust crop in place
+## CLI & Keyboard Shortcuts
 
-Use the configured capture shortcut (factory default `⌃X`):
-- **Single-click window snap**: Hover over any visible window (including Stage Manager thumbnails) to preview its bounds, then **single-click** to capture that exact window in one step.
-- **Freehand drag**: Click and drag anywhere (including on the desktop) to select a custom region.
-- **Full-screen capture**: Press `Space` or `⌘A` while in the capture overlay to capture the entire screen immediately.
-- **Magnifier & HEX color picker**: Hover to inspect pixel coordinates and the `8×` magnifier loupe; press `C` during capture to copy the hovered pixel's `#RRGGBB` HEX color and exit capture, or customize crosshair style (`Full-Screen Lines`, `Corner Bracket`, `Precision Dot`) and color in **Keyboard Shortcuts** (`⌘,`).
-
-The screenshot stays pinned at the exact screen coordinates you selected. Before moving the pin or selecting a drawing tool (at `100%` zoom), drag any of the 8 handles or 4 edges to expand or shrink the crop against the original full-screen frame.
-
-### 2. Hang multiple pins on the clothesline
-
-Press `P` (or click the clothespin icon) to park the current pin on the clothesline at the top of your screen:
-
-- **Batch copy, stitch & save**: Click multiple thumbnails on the line and click **Copy** (or **Save**) to copy or export them as separate images, or click **Stitch** to seamlessly join them vertically into a single Retina-sharp image.
-- **Multi-photo drag & drop**: Drag a selected photo to drag **all currently selected photos** together (or drag an unselected photo to drag just that one) directly into Slack, WeChat, a browser, or Finder. Drag the top rope to reposition the clothesline bar.
-- **Unclip**: Double-click any thumbnail to return it to the canvas.
-
-### 3. Annotate, OCR, QR scan, and translate
-
-- **Tools**: Rectangle (hold `Shift` for 1:1 square), arrow (hold `Shift` to snap `45°` angles), freehand pen, translucent highlighter (`.multiply` blend), auto-incrementing step counter (`① ② ③…`), text, emoji sticker (quick emoji bar + macOS Character Palette `⌃⌘Space`), and mosaic (`CIPixellate`), with 3 stroke sizes (`S` / `M` / `L` or `细` / `中` / `粗`) and 6 colors.
-- **Select, move, resize, recolor & delete annotations**: Click any drawn rectangle, arrow, pen/highlighter stroke, counter badge, text, emoji sticker, or mosaic region to reposition it, change its color/size from the toolbar, drag any of the 4 corner handles on a selected text, emoji, or counter annotation to smoothly scale its size, or press `Delete` / `⌫` to remove it (`⌘Z` undoes any change).
-- **Text & Emoji Stickers**: Text supports transparent, black pill, or white pill backgrounds; drag anywhere inside the text box to move it, double-click committed text to edit it in place, or drag its 4 corner handles after committing to resize the font smoothly while keeping `S` / `M` / `L` presets available. Emoji stickers can be placed from the toolbar's quick-pick emojis or any character from the macOS Character Palette, then resized directly by dragging their 4 corner handles.
-- **OCR (`O`)**: Recognizes Simplified Chinese, Traditional Chinese, and English offline via macOS `Vision` and copies the text to your clipboard.
-- **QR / Barcode Scan (`Q`)**: Decodes QR codes and barcodes offline via `VNDetectBarcodesRequest`, copies all payloads to your clipboard, and prompts before opening any detected `http`/`https` link.
-- **Translate (`T`)**: Runs OCR on the composited image and routes text to:
-  1. Local translation daemon (`gloss-daemon`, or custom name via `CLIP_LINE_TRANSLATE_DAEMON`)
-  2. Custom URL template (`CLIP_LINE_TRANSLATE_URL`)
-  3. macOS system Translation service
-  4. Browser translation (prompts once per destination domain before opening)
-
-### 4. CLI triggers
+### CLI Commands
 
 Use the full path `~/.local/bin/clipline` unless `~/.local/bin` is in your `PATH`:
 
 ```bash
 ~/.local/bin/clipline --capture     # start interactive region capture
-~/.local/bin/clipline --clipboard   # pin current clipboard image
+~/.local/bin/clipline --clipboard   # pin current clipboard image (or plain text as a sticky note)
 ~/.local/bin/clipline --settings    # open shortcut settings (starts the daemon if needed)
 ~/.local/bin/clipline --shortcuts   # print current global shortcuts as JSON
 ~/.local/bin/clipline --update      # update the invoked executable from official main
@@ -137,15 +251,15 @@ Use the full path `~/.local/bin/clipline` unless `~/.local/bin` is in your `PATH
 The capture and clipboard commands trigger a running daemon. Shortcut settings persist in the `io.github.clipline` UserDefaults suite.
 Carbon's exclusive registration detects conflicts with other exclusive Carbon hotkeys, but cannot detect every macOS, system, or app shortcut. If a binding does not work in a particular app, choose another one.
 
-## Shortcuts
+### Keyboard Shortcuts
 
-The table lists factory defaults; use **Keyboard Shortcuts** or `clipline --shortcuts` for your current bindings.
+The table lists factory defaults; use **Keyboard Shortcuts** (`⌘,`) or `clipline --shortcuts` for your current bindings.
 
 | Factory default | Context | Action |
 | :--- | :--- | :--- |
 | `⌃X` | Global | Capture region |
 | `⌘⇧X` | Global | Capture region (secondary shortcut) |
-| `⌃⌘V` | Global | Pin image from clipboard |
+| `⌃⌘V` | Global | Pin image (or plain text as a sticky note) from clipboard |
 | `Space` / `⌘A` | Capture overlay | Capture full screen immediately |
 | `C` | Capture overlay | Copy hovered pixel `#RRGGBB` HEX color and exit capture |
 | `↩` (`Return`) | Active pin | Copy composited image and close pin |
@@ -162,7 +276,11 @@ The table lists factory defaults; use **Keyboard Shortcuts** or `clipline --shor
 | `⌥` + Scroll | Active pin | Adjust opacity (`25%` – `100%`) |
 | `⎋` (`Esc`) | Capture / Pin | Cancel capture, cancel text edit, or close pin without modifying the clipboard |
 
-## Permissions
+---
+
+## Permissions, Configuration & Privacy
+
+### Permissions
 
 On first capture, macOS prompts for **Screen Recording** permission. The prompt may appear either for `clipline` or for your host terminal application (e.g., Terminal or iTerm2):
 
@@ -172,7 +290,7 @@ On first capture, macOS prompts for **Screen Recording** permission. The prompt 
 
 > **Note**: The updater reuses the existing certificate signing identity and identifier when available. Ad-hoc builds may require re-approving Screen Recording in System Settings after an update.
 
-## Configuration
+### Configuration
 
 | Variable / Key | Default | Description |
 | :--- | :--- | :--- |
@@ -190,21 +308,23 @@ Example custom translation URL:
 export CLIP_LINE_TRANSLATE_URL="https://www.deepl.com/translator#en/zh/{text}"
 ```
 
-## Development
-
-```bash
-make build      # compile release binary to ./build/clipline
-make test       # run unit & AppKit checks (uses isolated shortcut settings, pasteboard, and temp directory)
-make test-install # check scoped uninstall and reinstall in an isolated directory
-make uninstall  # stop daemon and remove ~/.local/bin/clipline
-make clean      # remove ./build
-```
-
-## Privacy & Security Notes
+### Privacy & Security Notes
 
 - **Mosaic is visual obfuscation**: Uses `CoreImage` `CIPixellate` (and falls back to an opaque dark fill if pixelation fails). For sensitive credentials or keys, crop them out or cover them with an opaque pen stroke.
 - **Temporary files**: Writes `ClipLine_*.png` to `$TMPDIR/ClipLine` (`0700`) so file-paste and drag-and-drop work across Finder and chat apps. Files older than 1 hour are removed on daemon startup and on subsequent copy actions.
 - **Local notifications**: When `gloss-daemon` is running, OCR text is posted via `DistributedNotificationCenter` within the current macOS user session.
+
+---
+
+## Development
+
+```bash
+make build        # compile release binary to ./build/clipline
+make test         # run unit & AppKit checks (uses isolated shortcut settings, pasteboard, and temp directory)
+make test-install # check scoped uninstall and reinstall in an isolated directory
+make uninstall    # stop daemon and remove ~/.local/bin/clipline
+make clean        # remove ./build
+```
 
 ## License
 

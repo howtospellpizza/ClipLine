@@ -158,7 +158,7 @@ final class PinSessionViewModel: ObservableObject {
         let dyPt = (rawEnd.y - start.y) * h
 
         switch tool {
-        case .rect:
+        case .rect, .spotlight:
             let side = max(abs(dxPt), abs(dyPt))
             let sx: CGFloat = dxPt >= 0 ? 1.0 : -1.0
             let sy: CGFloat = dyPt >= 0 ? 1.0 : -1.0
@@ -418,10 +418,10 @@ final class PinSessionViewModel: ObservableObject {
         isSyncingToolbarFromSelection = true
         defer { isSyncingToolbarFromSelection = false }
 
-        if item.tool != .mosaic && item.tool != .emoji {
+        if item.tool != .mosaic && item.tool != .emoji && item.tool != .spotlight {
             selectedColor = Self.matchingToolbarPaletteColor(for: item.color)
         }
-        if item.tool != .emoji {
+        if item.tool != .emoji && item.tool != .spotlight {
             strokePreset = Self.matchingStrokePreset(for: item)
         }
         if item.tool == .text {
@@ -472,7 +472,7 @@ final class PinSessionViewModel: ObservableObject {
         case .emoji: return preset.emojiFontSize
         case .highlighter: return preset.highlighterBrushWidth
         case .mosaic: return preset.mosaicBrushWidth
-        case .rect, .arrow, .pen: return preset.strokeLineWidth
+        case .rect, .spotlight, .arrow, .pen: return preset.strokeLineWidth
         }
     }
 
@@ -699,8 +699,9 @@ final class PinSessionViewModel: ObservableObject {
         ctx.translateBy(x: 0, y: targetSize.height)
         ctx.scaleBy(x: 1.0, y: -1.0)
 
+        drawSpotlightMaskIfNeeded(for: annotations, ctx: ctx, size: targetSize)
         for item in annotations {
-            drawAnnotationInCGContext(item, ctx: ctx, size: targetSize)
+            drawAnnotationInCGContext(item, ctx: ctx, size: targetSize, includeSpotlightBackdrop: false)
         }
 
         ctx.restoreGState()
@@ -711,7 +712,41 @@ final class PinSessionViewModel: ObservableObject {
         return result
     }
 
-    func drawAnnotationInCGContext(_ item: PinAnnotation, ctx: CGContext, size: NSSize, scaleMultiplier: CGFloat = 1.0) {
+    func drawSpotlightMaskIfNeeded(for items: [PinAnnotation], ctx: CGContext, size: NSSize, scaleMultiplier: CGFloat = 1.0) {
+        let spots = items.filter { $0.tool == .spotlight && $0.points.count >= 2 }
+        guard !spots.isEmpty else { return }
+
+        let fullRect = CGRect(origin: .zero, size: size)
+        ctx.saveGState()
+        ctx.beginTransparencyLayer(in: fullRect, auxiliaryInfo: nil)
+        ctx.setFillColor(NSColor.black.withAlphaComponent(0.54).cgColor)
+        ctx.fill(fullRect)
+
+        ctx.setBlendMode(.clear)
+        for spot in spots {
+            let pts = spot.points.map { CGPoint(x: $0.x * size.width, y: $0.y * size.height) }
+            let rect = CGRect(
+                x: min(pts[0].x, pts.last!.x),
+                y: min(pts[0].y, pts.last!.y),
+                width: abs(pts.last!.x - pts[0].x),
+                height: abs(pts.last!.y - pts[0].y)
+            )
+            let cornerRadius = min(6.0 * scaleMultiplier, min(rect.width, rect.height) * 0.2)
+            let spotPath = CGPath(roundedRect: rect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+            ctx.addPath(spotPath)
+            ctx.fillPath()
+        }
+        ctx.endTransparencyLayer()
+        ctx.restoreGState()
+    }
+
+    func drawAnnotationInCGContext(
+        _ item: PinAnnotation,
+        ctx: CGContext,
+        size: NSSize,
+        scaleMultiplier: CGFloat = 1.0,
+        includeSpotlightBackdrop: Bool = true
+    ) {
         guard !item.points.isEmpty else { return }
         let pts = item.points.map { CGPoint(x: $0.x * size.width, y: $0.y * size.height) }
         let lw = item.lineWidth * scaleMultiplier
@@ -733,6 +768,35 @@ final class PinSessionViewModel: ObservableObject {
                 height: abs(pts.last!.y - pts[0].y)
             )
             ctx.stroke(rect)
+
+        case .spotlight:
+            guard pts.count >= 2 else { break }
+            let rect = CGRect(
+                x: min(pts[0].x, pts.last!.x),
+                y: min(pts[0].y, pts.last!.y),
+                width: abs(pts.last!.x - pts[0].x),
+                height: abs(pts.last!.y - pts[0].y)
+            )
+            let cornerRadius = min(6.0 * scaleMultiplier, min(rect.width, rect.height) * 0.2)
+            let spotPath = CGPath(roundedRect: rect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+
+            if includeSpotlightBackdrop {
+                let maskPath = CGMutablePath()
+                maskPath.addRect(CGRect(origin: .zero, size: size))
+                maskPath.addPath(spotPath)
+                ctx.saveGState()
+                ctx.addPath(maskPath)
+                ctx.setFillColor(NSColor.black.withAlphaComponent(0.54).cgColor)
+                ctx.fillPath(using: .evenOdd)
+                ctx.restoreGState()
+            }
+
+            ctx.saveGState()
+            ctx.addPath(spotPath)
+            ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.55).cgColor)
+            ctx.setLineWidth(1.2 * scaleMultiplier)
+            ctx.strokePath()
+            ctx.restoreGState()
 
         case .arrow:
             guard pts.count >= 2 else { break }

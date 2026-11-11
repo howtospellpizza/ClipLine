@@ -33,7 +33,7 @@ struct PinToolbarView: View {
             let selectedTool: PinAnnotation.Tool? = vm.annotations.first(where: { $0.id == vm.selectedTextAnnotationID })?.tool
             let activeOrSelectedTool: PinAnnotation.Tool? = selectedTool ?? vm.activeTool
             if let styleTool = activeOrSelectedTool {
-                if styleTool != .emoji {
+                if styleTool != .emoji && styleTool != .spotlight {
                     Divider().frame(height: 16)
                     HStack(spacing: 3) {
                         ForEach(StrokePreset.allCases) { preset in
@@ -62,7 +62,7 @@ struct PinToolbarView: View {
                     }
                 }
 
-                if styleTool != .mosaic && styleTool != .emoji {
+                if styleTool != .mosaic && styleTool != .emoji && styleTool != .spotlight {
                     Divider().frame(height: 16)
                     HStack(spacing: 4) {
                         ForEach(palette, id: \.self) { c in
