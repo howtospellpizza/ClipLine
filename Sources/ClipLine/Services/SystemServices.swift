@@ -264,10 +264,13 @@ enum ClipboardHelper {
             colorSpaceName: .deviceRGB,
             bytesPerRow: 0,
             bitsPerPixel: 0
-        ), let gfxCtx = NSGraphicsContext(bitmapImageRep: rep) else {
+        ) else {
             return NSImage()
         }
         rep.size = targetSize
+        guard let gfxCtx = NSGraphicsContext(bitmapImageRep: rep) else {
+            return NSImage()
+        }
 
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = gfxCtx
@@ -284,7 +287,7 @@ enum ClipboardHelper {
                     gradient,
                     start: CGPoint(x: 0, y: totalH),
                     end: CGPoint(x: totalW, y: 0),
-                    options: []
+                    options: [.drawsBeforeStartLocation, .drawsAfterEndLocation]
                 )
             } else {
                 NSColor(calibratedRed: 0.16, green: 0.18, blue: 0.24, alpha: 1.0).setFill()

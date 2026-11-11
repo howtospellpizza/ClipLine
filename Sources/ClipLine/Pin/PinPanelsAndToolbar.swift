@@ -13,18 +13,40 @@ struct PinToolbarView: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(PinAnnotation.Tool.allCases) { tool in
+                let isActive = (vm.activeTool == tool)
                 Button(action: {
                     vm.commitPendingText()
-                    vm.activeTool = (vm.activeTool == tool) ? nil : tool
+                    vm.activeTool = isActive ? nil : tool
                     vm.hostingPanel?.canvasView?.needsDisplay = true
                 }) {
-                    Image(systemName: tool.icon)
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                        .background(vm.activeTool == tool ? Color.accentColor : Color.clear)
-                        .foregroundColor(vm.activeTool == tool ? .white : .primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 5))
-                        .contentShape(Rectangle())
+                    Group {
+                        if tool == .highlighter {
+                            ZStack(alignment: .bottom) {
+                                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                    .fill(isActive ? vm.selectedColor : Color.yellow.opacity(0.92))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                            .stroke(isActive ? Color.white.opacity(0.65) : Color.orange.opacity(0.45), lineWidth: 0.6)
+                                    )
+                                    .frame(width: 15, height: 4.5)
+                                    .offset(y: -3.0)
+                                // Clip out the thin built-in bottom line of SF Symbol `highlighter` so the yellow bar replaces it cleanly
+                                Image(systemName: tool.icon)
+                                    .font(.system(size: 12.5, weight: .semibold))
+                                    .frame(width: 20, height: 15, alignment: .top)
+                                    .clipped()
+                                    .offset(y: -6.5)
+                            }
+                        } else {
+                            Image(systemName: tool.icon)
+                                .font(.system(size: 12.5, weight: .semibold))
+                        }
+                    }
+                    .frame(width: 24, height: 24)
+                    .background(isActive ? Color.accentColor : Color.clear)
+                    .foregroundColor(isActive ? .white : .primary)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(tool.localizedName)
