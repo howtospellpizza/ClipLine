@@ -355,7 +355,11 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
         guard !handles.isEmpty else { return nil }
         let spanX = abs((handles.first(where: { $0.0 == .topRight })?.1.x ?? 0) - (handles.first(where: { $0.0 == .topLeft })?.1.x ?? 0))
         let spanY = abs((handles.first(where: { $0.0 == .topLeft })?.1.y ?? 0) - (handles.first(where: { $0.0 == .bottomLeft })?.1.y ?? 0))
-        let hitRadius: CGFloat = min(9.0, max(3.5, min(spanX, spanY) * 0.28))
+        let selectedTool = vm.selectedTextAnnotationID.flatMap { selectedID in
+            vm.annotations.first(where: { $0.id == selectedID })?.tool
+        }
+        let minimumHitRadius: CGFloat = selectedTool == .spotlight ? 0.0 : 3.5
+        let hitRadius: CGFloat = min(9.0, max(minimumHitRadius, min(spanX, spanY) * 0.28))
         var bestHandle: PinSessionViewModel.ResizeHandle? = nil
         var bestDist: CGFloat = .greatestFiniteMagnitude
         for (handle, pt) in handles {
@@ -430,7 +434,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             let outer = rect.insetBy(dx: -tol, dy: -tol)
             guard outer.contains(viewPoint) else { return false }
             if vm.activeTool != nil {
-                let innerTol = min(tol, max(1.5, min(rect.width, rect.height) * 0.25))
+                let innerTol = min(tol, min(rect.width, rect.height) * 0.25)
                 if rect.width > innerTol * 2 && rect.height > innerTol * 2 {
                     let inner = rect.insetBy(dx: innerTol, dy: innerTol)
                     return !inner.contains(viewPoint)

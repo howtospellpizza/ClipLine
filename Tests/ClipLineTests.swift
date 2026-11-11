@@ -2303,6 +2303,150 @@ func runAllTests() -> Int32 {
         "Dragging the center of a selected 12x12pt Spotlight moves it uniformly instead of triggering a corner resize"
     )
 
+    func canvasMouseEvent(_ type: NSEvent.EventType, at location: NSPoint, eventNumber: Int) -> NSEvent? {
+        NSEvent.mouseEvent(
+            with: type, location: location, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, eventNumber: eventNumber, clickCount: 1, pressure: 1.0
+        )
+    }
+
+    // At 35% zoom, 12pt becomes 4.2pt and its center is closer to a corner than the old 3.5pt handle floor.
+    let zoomedSpotVM = PinSessionViewModel(image: whiteImg)
+    zoomedSpotVM.scale = 0.35
+    let zoomedSpot = PinAnnotation(
+        tool: .spotlight,
+        color: .red,
+        lineWidth: 1.5,
+        points: [CGPoint(x: 0.40, y: 0.40), CGPoint(x: 0.52, y: 0.52)]
+    )
+    zoomedSpotVM.annotations = [zoomedSpot]
+    zoomedSpotVM.selectedTextAnnotationID = zoomedSpot.id
+    let zoomedSpotCanvas = PinCanvasNSView(frame: NSRect(x: 0, y: 0, width: 67, height: 67), vm: zoomedSpotVM)
+    let zoomedSpotImageRect = zoomedSpotCanvas.imageRectInView
+    let zoomedSpotCenter = NSPoint(
+        x: zoomedSpotImageRect.minX + 0.46 * zoomedSpotImageRect.width,
+        y: zoomedSpotImageRect.maxY - 0.46 * zoomedSpotImageRect.height
+    )
+    let originalZoomedSpotPoints = zoomedSpot.points
+    if let down = canvasMouseEvent(.leftMouseDown, at: zoomedSpotCenter, eventNumber: 309),
+       let drag = canvasMouseEvent(.leftMouseDragged, at: NSPoint(x: zoomedSpotCenter.x + 2, y: zoomedSpotCenter.y), eventNumber: 310),
+       let up = canvasMouseEvent(.leftMouseUp, at: NSPoint(x: zoomedSpotCenter.x + 2, y: zoomedSpotCenter.y), eventNumber: 311) {
+        zoomedSpotCanvas.mouseDown(with: down)
+        zoomedSpotCanvas.mouseDragged(with: drag)
+        zoomedSpotCanvas.mouseUp(with: up)
+        let movedZoomedSpotPoints = zoomedSpotVM.annotations.first(where: { $0.id == zoomedSpot.id })?.points ?? []
+        let movedZoomedSpotWidth = movedZoomedSpotPoints.count >= 2
+            ? abs(movedZoomedSpotPoints[1].x - movedZoomedSpotPoints[0].x)
+            : 0
+        t.check(
+            abs(zoomedSpotImageRect.width * 0.12 - 4.2) < 0.001 &&
+            movedZoomedSpotPoints.count >= 2 &&
+            movedZoomedSpotPoints[0].x > originalZoomedSpotPoints[0].x + 0.01 &&
+            abs(movedZoomedSpotWidth - 0.12) < 0.001 &&
+            abs(movedZoomedSpotPoints[0].y - originalZoomedSpotPoints[0].y) < 0.001,
+            "At 35% zoom, dragging the center of a selected 12pt Spotlight moves it without changing its width",
+            detail: "points=\(movedZoomedSpotPoints), width=\(movedZoomedSpotWidth)"
+        )
+    } else {
+        t.check(false, "Constructed 35% Spotlight center-drag events")
+    }
+
+    // A 6pt Spotlight displays as 2.1pt at 35%: its border remains selectable while its interior passes through to Counter.
+    let counterSpotVM = PinSessionViewModel(image: whiteImg)
+    counterSpotVM.scale = 0.35
+    let sixPointSpot = PinAnnotation(
+        tool: .spotlight,
+        color: .red,
+        lineWidth: 1.5,
+        points: [CGPoint(x: 0.40, y: 0.40), CGPoint(x: 0.46, y: 0.46)]
+    )
+    counterSpotVM.annotations = [sixPointSpot]
+    let counterSpotCanvas = PinCanvasNSView(frame: NSRect(x: 0, y: 0, width: 67, height: 67), vm: counterSpotVM)
+    let counterSpotImageRect = counterSpotCanvas.imageRectInView
+    counterSpotVM.activeTool = .counter
+    let counterSpotBorder = NSPoint(
+        x: counterSpotImageRect.minX + 0.40 * counterSpotImageRect.width,
+        y: counterSpotImageRect.maxY - 0.43 * counterSpotImageRect.height
+    )
+    if let borderDown = canvasMouseEvent(.leftMouseDown, at: counterSpotBorder, eventNumber: 312),
+       let borderUp = canvasMouseEvent(.leftMouseUp, at: counterSpotBorder, eventNumber: 313) {
+        counterSpotCanvas.mouseDown(with: borderDown)
+        counterSpotCanvas.mouseUp(with: borderUp)
+        t.check(
+            counterSpotVM.annotations.count == 1 && counterSpotVM.selectedTextAnnotationID == sixPointSpot.id,
+            "A 35% 6pt Spotlight border remains selectable with the Counter tool active"
+        )
+    } else {
+        t.check(false, "Constructed 35% Spotlight border-click events")
+    }
+    counterSpotVM.selectedTextAnnotationID = nil
+    let counterSpotCenter = NSPoint(
+        x: counterSpotImageRect.minX + 0.43 * counterSpotImageRect.width,
+        y: counterSpotImageRect.maxY - 0.43 * counterSpotImageRect.height
+    )
+    if let centerDown = canvasMouseEvent(.leftMouseDown, at: counterSpotCenter, eventNumber: 314),
+       let centerUp = canvasMouseEvent(.leftMouseUp, at: counterSpotCenter, eventNumber: 315) {
+        counterSpotCanvas.mouseDown(with: centerDown)
+        counterSpotCanvas.mouseUp(with: centerUp)
+        t.check(
+            counterSpotVM.annotations.count == 2 &&
+            counterSpotVM.annotations.first?.id == sixPointSpot.id &&
+            counterSpotVM.annotations.last?.tool == .counter,
+            "At 35% zoom, clicking inside a 6pt Spotlight places a Counter instead of selecting the Spotlight"
+        )
+    } else {
+        t.check(false, "Constructed 35% Spotlight interior Counter-placement events")
+    }
+
+    // Exact 6pt Spotlight corners still resize at 100%, keep the opposite corner fixed, and undo cleanly.
+    let cornerSpotVM = PinSessionViewModel(image: whiteImg)
+    let cornerSpot = PinAnnotation(
+        tool: .spotlight,
+        color: .red,
+        lineWidth: 1.5,
+        points: [CGPoint(x: 0.40, y: 0.40), CGPoint(x: 0.46, y: 0.46)]
+    )
+    cornerSpotVM.annotations = [cornerSpot]
+    cornerSpotVM.selectedTextAnnotationID = cornerSpot.id
+    let cornerSpotCanvas = PinCanvasNSView(frame: NSRect(x: 0, y: 0, width: 132, height: 132), vm: cornerSpotVM)
+    let originalCornerSpotPoints = cornerSpot.points
+    if let topLeft = cornerSpotCanvas.selectedAnnotationCornerHandlesInView().first(where: { $0.0 == .topLeft })?.1 {
+        t.check(
+            cornerSpotCanvas.hitTestSelectedAnnotationCornerHandle(viewPoint: topLeft) == .topLeft,
+            "The exact top-left corner of a 6pt Spotlight remains a resize hit at 100%"
+        )
+        let draggedTopLeft = NSPoint(x: topLeft.x - 6, y: topLeft.y + 6)
+        if let down = canvasMouseEvent(.leftMouseDown, at: topLeft, eventNumber: 316),
+           let drag = canvasMouseEvent(.leftMouseDragged, at: draggedTopLeft, eventNumber: 317),
+           let up = canvasMouseEvent(.leftMouseUp, at: draggedTopLeft, eventNumber: 318) {
+            cornerSpotCanvas.mouseDown(with: down)
+            cornerSpotCanvas.mouseDragged(with: drag)
+            cornerSpotCanvas.mouseUp(with: up)
+            let resizedPoints = cornerSpotVM.annotations.first(where: { $0.id == cornerSpot.id })?.points ?? []
+            let originalWidth = abs(originalCornerSpotPoints[1].x - originalCornerSpotPoints[0].x)
+            let originalHeight = abs(originalCornerSpotPoints[1].y - originalCornerSpotPoints[0].y)
+            let resizedWidth = resizedPoints.count >= 2 ? abs(resizedPoints[1].x - resizedPoints[0].x) : 0
+            let resizedHeight = resizedPoints.count >= 2 ? abs(resizedPoints[1].y - resizedPoints[0].y) : 0
+            let oppositeCorner = originalCornerSpotPoints[1]
+            t.check(
+                resizedWidth > originalWidth && resizedHeight > originalHeight &&
+                resizedPoints.contains(where: {
+                    abs($0.x - oppositeCorner.x) < 0.001 && abs($0.y - oppositeCorner.y) < 0.001
+                }) && cornerSpotVM.undoHistory.count == 1,
+                "Dragging an exact 6pt Spotlight corner grows it around the fixed opposite corner with one undo snapshot"
+            )
+            cornerSpotVM.undo()
+            t.check(
+                cornerSpotVM.annotations.first(where: { $0.id == cornerSpot.id })?.points == originalCornerSpotPoints,
+                "Undo restores the original 6pt Spotlight points after corner resize"
+            )
+        } else {
+            t.check(false, "Constructed exact-corner 6pt Spotlight resize events")
+        }
+    } else {
+        t.check(false, "Found the selected 6pt Spotlight top-left corner")
+    }
+
     // Verify Clipboard Text -> Pin card rendering (Retina 2x, warm sticky paper, indentation & CRLF handling) and pinFromClipboard text fallback
     let textPasteboard = NSPasteboard.withUniqueName()
     textPasteboard.clearContents()
