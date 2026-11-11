@@ -22,14 +22,13 @@ concurrency:
   group: release-main
   cancel-in-progress: false
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
   prepare-bump-pr:
     if: github.event_name == 'workflow_dispatch' && inputs.bump != 'sync'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Checkout main branch
         uses: actions/checkout@v4
@@ -61,11 +60,18 @@ jobs:
           branch="chore/release-v${next}"
           today=$(date -u +%Y-%m-%d)
 
-          if gh pr view "$branch" >/dev/null 2>&1; then
+          pr_state=$(gh pr view "$branch" --json state --jq .state 2>/dev/null || true)
+          if [ "$pr_state" = "OPEN" ]; then
             echo "Release PR for $branch is already open — skipping branch overwrite to preserve any manual edits."
             exit 0
           fi
           if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git fetch origin "$branch"
+            branch_ver=$(git show "origin/${branch}:VERSION" 2>/dev/null | tr -d '[:space:]' || true)
+            if [ "$branch_ver" != "$next" ]; then
+              echo "Error: Remote branch $branch exists with VERSION='${branch_ver}' (expected '${next}'). Reconcile or delete the stale branch first." >&2
+              exit 1
+            fi
             echo "Remote branch $branch already exists without an open PR; opening PR from existing branch."
             gh pr create \
               --base main \
@@ -132,6 +138,10 @@ jobs:
        github.event.workflow_run.head_repository.full_name == github.repository) ||
       (github.event_name == 'workflow_dispatch' && inputs.bump == 'sync')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+      checks: read
     steps:
       - name: Checkout verified main commit
         uses: actions/checkout@v4
@@ -140,6 +150,7 @@ jobs:
           fetch-depth: 0
 
       - name: Verify commit is current main HEAD and has passing CI
+        id: verify
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
@@ -150,17 +161,20 @@ jobs:
           main_sha=$(git ls-remote origin refs/heads/main | awk '{print $1}')
           if [ "$head_sha" != "$main_sha" ]; then
             echo "Checked-out commit ${head_sha} is behind current origin/main (${main_sha}); skipping stale run."
+            echo "verified=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            ci_ok=$(gh api "repos/${REPO}/commits/${head_sha}/check-runs" --jq '[.check_runs[] | select(.name == "build-and-test" and .status == "completed" and .conclusion == "success")] | length')
+            ci_ok=$(gh api "repos/${REPO}/actions/workflows/ci.yml/runs?event=push&branch=main&head_sha=${head_sha}" --jq '[.workflow_runs[] | select(.status == "completed" and .conclusion == "success" and .head_repository.full_name == "'"${REPO}"'")] | length')
             if [ "${ci_ok:-0}" -lt 1 ]; then
-              echo "Error: Commit ${head_sha} does not have a completed successful 'build-and-test' CI check run. Refusing to publish unverified commit." >&2
+              echo "Error: Commit ${head_sha} does not have a completed successful push CI workflow run on main. Refusing to publish unverified commit." >&2
               exit 1
             fi
           fi
+          echo "verified=true" >> "$GITHUB_OUTPUT"
 
       - name: Create Tag and GitHub Release if missing
+        if: steps.verify.outputs.verified == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

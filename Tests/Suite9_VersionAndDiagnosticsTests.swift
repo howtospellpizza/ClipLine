@@ -54,8 +54,8 @@ func runSuite9VersionAndDiagnosticsTests(_ t: TestHarness, testPasteboard: NSPas
         "DiagnosticsService.recordEvent rotates log file within maxBytes budget (\(rotatedBytes)B <= 1024B, \(tailAfterRotation.count) lines retained)"
     )
 
-        // 2. Verify oversized single event is truncated to fit within maxBytes
-        let oversizedMessage = String(repeating: "x", count: 2048)
+        // 2. Verify oversized single event (including multi-byte UTF-8) is truncated safely within maxBytes
+        let oversizedMessage = String(repeating: "🔥截屏", count: 400)
         DiagnosticsService.recordEvent(
             category: "probe",
             message: oversizedMessage,
@@ -63,9 +63,10 @@ func runSuite9VersionAndDiagnosticsTests(_ t: TestHarness, testPasteboard: NSPas
             maxBytes: 256
         )
         let bytesAfterOversized = (try? FileManager.default.attributesOfItem(atPath: logFileURL.path)[.size] as? NSNumber)?.intValue ?? Int.max
+        let linesAfterOversized = DiagnosticsService.readRecentLogLines(limit: 5, logFileURL: logFileURL)
         t.check(
-            bytesAfterOversized <= 256,
-            "DiagnosticsService.recordEvent truncates oversized single event within maxBytes (\(bytesAfterOversized)B <= 256B)"
+            bytesAfterOversized <= 256 && linesAfterOversized.last?.contains("[probe]") == true,
+            "DiagnosticsService.recordEvent truncates oversized multi-byte UTF-8 event within maxBytes (\(bytesAfterOversized)B <= 256B)"
         )
 
     // 3. collectReport produces accurate read-only text & JSON without creating directories/files or touching live settings

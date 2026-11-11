@@ -103,8 +103,14 @@ enum DiagnosticsService {
         let timestamp = ISO8601DateFormatter().string(from: Date())
         var line = "[\(timestamp)] [v\(ClipLineVersion.current)] [\(sanitizedCategory)] \(sanitizedMessage)\n"
         if maxBytes > 0, line.utf8.count > maxBytes {
-            let cappedPrefix = String(line.utf8.prefix(max(0, maxBytes - 1))) ?? ""
-            line = cappedPrefix + "\n"
+            let maxPrefixBytes = max(0, maxBytes - 1)
+            let utf8Bytes = Array(line.utf8.prefix(maxPrefixBytes))
+            let cappedPrefix = String(decoding: utf8Bytes, as: UTF8.self)
+            var trimmed = cappedPrefix
+            while trimmed.utf8.count > maxPrefixBytes, !trimmed.isEmpty {
+                trimmed.removeLast()
+            }
+            line = trimmed + "\n"
         }
         guard let data = line.data(using: .utf8), data.count <= max(1, maxBytes) else { return }
 
