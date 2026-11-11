@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump when dispatching manually (patch, minor, major)"
+        required: false
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump VERSION on manual dispatch (optional)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          BUMP_TYPE: ${{ inputs.bump }}
+        run: |
+          current=$(tr -d '[:space:]' < VERSION)
+          IFS='.' read -r major minor patch <<EOF
+          $current
+          EOF
+          case "$BUMP_TYPE" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            *)     patch=$((patch + 1)) ;;
+          esac
+          next="${major}.${minor}.${patch}"
+          printf '%s\n' "$next" > VERSION
+          printf '// Auto-generated from VERSION by Makefile — committed so `swift build` also works out of the box.\nlet ClipLineGeneratedBuildVersion = "%s"\n' "$next" > Sources/ClipLine/Services/GeneratedVersion.swift
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION Sources/ClipLine/Services/GeneratedVersion.swift
+          git commit -m "chore(release): v${next}"
+          git push origin HEAD:main
+
+      - name: Create Tag and GitHub Release if VERSION is untagged
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ver=$(tr -d '[:space:]' < VERSION)
+          tag="v${ver}"
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists — skipping release creation."
+            exit 0
+          fi
+
+          prev_tag=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -n "$prev_tag" ]; then
+            commits=$(git log "${prev_tag}..HEAD" --no-merges --pretty=format:"- %s (%h)")
+          else
+            commits=$(git log -n 30 --no-merges --pretty=format:"- %s (%h)")
+          fi
+
+          notes_file=$(mktemp)
+          {
+            echo "## ClipLine ${tag}"
+            echo ""
+            if [ -n "$commits" ]; then
+              echo "### Changes"
+              echo "$commits"
+              echo ""
+            fi
+            echo "### Install or Upgrade"
+            echo '```bash'
+            echo 'clipline --update'
+            echo '# or fresh install:'
+            echo 'curl -fsSL https://raw.githubusercontent.com/howtospellpizza/ClipLine/main/install.sh | bash'
+            echo '```'
+          } > "$notes_file"
+
+          git tag "$tag"
+          git push origin "$tag"
+          gh release create "$tag" --title "ClipLine ${tag}" --notes-file "$notes_file"

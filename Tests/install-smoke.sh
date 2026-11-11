@@ -17,6 +17,17 @@ case "$help" in
     *"--update"*) ;;
     *) echo "FAIL: --help does not list --update" >&2; exit 1 ;;
 esac
+case "$help" in
+    *"--doctor"*) ;;
+    *) echo "FAIL: --help does not list --doctor" >&2; exit 1 ;;
+esac
+version_out=$("$install_dir/clipline" --version)
+printf '%s\n' "$version_out"
+expected_ver=$(tr -d '[:space:]' < VERSION)
+case "$version_out" in
+    "ClipLine $expected_ver "*) ;;
+    *) echo "FAIL: --version output ($version_out) does not match VERSION ($expected_ver)" >&2; exit 1 ;;
+esac
 
 # Stand-in processes exercise path-scoped termination, not GUI/TCC state.
 mv "$install_dir/clipline" "$root/compiled-clipline"

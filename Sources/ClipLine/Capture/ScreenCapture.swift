@@ -101,12 +101,14 @@ final class ScreenCaptureOverlayController {
 
     func beginCapture(completion: @escaping (CaptureSelectionResult?) -> Void) {
         guard ensureScreenCaptureAccess(showAlertOnDenial: true) else {
+            DiagnosticsService.recordEvent(category: "permission_denied", message: "beginCapture blocked by screen capture access check")
             completion(nil)
             return
         }
 
         let allScreens = NSScreen.screens
         guard !allScreens.isEmpty else {
+            DiagnosticsService.recordEvent(category: "capture_aborted", message: "NSScreen.screens was empty")
             completion(nil)
             return
         }
@@ -130,6 +132,7 @@ final class ScreenCaptureOverlayController {
         }
 
         guard descriptors.contains(where: { $0.isInitialCursorScreen }) else {
+            DiagnosticsService.recordEvent(category: "capture_aborted", message: "initial cursor display capture returned nil")
             presentPermissionAlert()
             completion(nil)
             return

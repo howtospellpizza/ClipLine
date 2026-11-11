@@ -245,6 +245,8 @@ Use the full path `~/.local/bin/clipline` unless `~/.local/bin` is in your `PATH
 ~/.local/bin/clipline --clipboard   # pin current clipboard image (or plain text as a sticky note)
 ~/.local/bin/clipline --settings    # open shortcut settings (starts the daemon if needed)
 ~/.local/bin/clipline --shortcuts   # print current global shortcuts as JSON
+~/.local/bin/clipline --doctor      # print read-only local diagnostic report (add --json for JSON)
+~/.local/bin/clipline --version     # print ClipLine version and target architecture
 ~/.local/bin/clipline --update      # update the invoked executable from official main
 ```
 
@@ -319,11 +321,12 @@ export CLIP_LINE_TRANSLATE_URL="https://www.deepl.com/translator#en/zh/{text}"
 ## Development
 
 ```bash
-make build        # compile release binary to ./build/clipline
-make test         # run unit & AppKit checks (uses isolated shortcut settings, pasteboard, and temp directory)
-make test-install # check scoped uninstall and reinstall in an isolated directory
-make uninstall    # stop daemon and remove ~/.local/bin/clipline
-make clean        # remove ./build
+make build                    # compile release binary to ./build/clipline
+make test                     # run all 9 unit & AppKit suites (isolated pasteboard & temp directory)
+make test FILTER="Suite 5"    # run only matching test suite(s)
+make test-install             # check scoped uninstall and reinstall in an isolated directory
+make uninstall                # stop daemon and remove ~/.local/bin/clipline
+make clean                    # remove ./build
 ```
 
 ## License

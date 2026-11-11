@@ -245,7 +245,9 @@ make uninstall
 ~/.local/bin/clipline --clipboard   # 将剪贴板中的图片（或纯文本便签卡片）贴到屏幕上
 ~/.local/bin/clipline --settings    # 打开快捷键设置（必要时启动守护进程）
 ~/.local/bin/clipline --shortcuts   # 以 JSON 输出当前全局快捷键
+~/.local/bin/clipline --doctor      # 输出只读本地诊断报告（可附加 --json 输出 JSON）
 ~/.local/bin/clipline --update      # 从官方 main 更新当前调用的二进制文件
+~/.local/bin/clipline --version     # 输出版本号与目标架构
 ```
 
 截图与剪贴板命令会触发正在运行的守护进程。快捷键设置保存在 `io.github.clipline` UserDefaults 套件中。
