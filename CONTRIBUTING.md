@@ -52,4 +52,4 @@ Thank you for contributing to **ClipLine**! ClipLine is a native, zero-dependenc
 - Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `test:`, `chore:`) so release notes can be generated automatically.
 - Ensure `make build`, `make test`, and `make test-install` pass before opening a PR.
 - Keep `README.md` and `README.zh-CN.md` synchronized when adding user-facing flags, shortcuts, or tools.
-- Releases are lightweight (version bump in `VERSION` + `CHANGELOG.md` + Git tag & GitHub Release); ClipLine installs directly as a CLI binary via `install.sh` / `make install` without `.app` or `.dmg` bundle overhead.
+- Releases are lightweight (version bump in `VERSION` + `CHANGELOG.md` + Git tag & GitHub Release); ClipLine installs directly as a CLI binary via `make install` / `clipline --update` without `.app` or `.dmg` bundle overhead.

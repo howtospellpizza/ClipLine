@@ -107,14 +107,25 @@ enum DiagnosticsService {
         let dirURL = logFileURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
 
-        if FileManager.default.fileExists(atPath: logFileURL.path) {
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: logFileURL.path),
-               let size = attrs[.size] as? NSNumber,
-               size.intValue > maxBytes,
+        if FileManager.default.fileExists(atPath: logFileURL.path),
+           let attrs = try? FileManager.default.attributesOfItem(atPath: logFileURL.path),
+           let size = attrs[.size] as? NSNumber {
+            if size.intValue + data.count > maxBytes,
                let existing = try? String(contentsOf: logFileURL, encoding: .utf8) {
                 let allLines = existing.components(separatedBy: "\n").filter { !$0.isEmpty }
-                let kept = allLines.suffix(100).joined(separator: "\n") + "\n"
-                try? kept.data(using: .utf8)?.write(to: logFileURL, options: .atomic)
+                let budget = max(0, maxBytes - data.count)
+                var keptLines: [String] = []
+                var currentBytes = 0
+                for existingLine in allLines.suffix(100).reversed() {
+                    let lineBytes = existingLine.utf8.count + 1
+                    if currentBytes + lineBytes > budget { break }
+                    keptLines.append(existingLine)
+                    currentBytes += lineBytes
+                }
+                keptLines.reverse()
+                let rotated = (keptLines.isEmpty ? "" : keptLines.joined(separator: "\n") + "\n") + line
+                try? rotated.data(using: .utf8)?.write(to: logFileURL, options: .atomic)
+                return
             }
             if let handle = try? FileHandle(forWritingTo: logFileURL) {
                 defer { try? handle.close() }
@@ -138,23 +149,23 @@ enum DiagnosticsService {
         return Array(lines.suffix(limit))
     }
 
-    /// Probes whether another process currently holds an exclusive flock on the daemon lock file without keeping it locked.
-    static func isDaemonLockHeld(atPath lockPath: String = SingleInstanceLock.lockFilePath) -> Bool {
-        let fd = open(lockPath, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
-        guard fd >= 0 else { return false }
-        defer { close(fd) }
-        if flock(fd, LOCK_EX | LOCK_NB) == 0 {
+    /// Read-only probe of whether a running daemon currently holds an exclusive flock on the lock file.
+    /// Never creates directories/files or acquires an exclusive lock, so it cannot interfere with concurrent daemon startup.
+    static func isDaemonLockHeld(atPath lockPath: String = SingleInstanceLock.resolvedLockFilePath) -> Bool {
+        let fd = open(lockPath, O_RDONLY | O_SHLOCK | O_NONBLOCK)
+        if fd >= 0 {
             _ = flock(fd, LOCK_UN)
+            close(fd)
             return false
         }
-        return true
+        return errno == EWOULDBLOCK || errno == EAGAIN
     }
 
     @MainActor
     static func collectReport(
         defaults: UserDefaults = UserDefaults(suiteName: ShortcutConfigurationStore.suiteName)!,
         logFileURL: URL = defaultLogFileURL,
-        lockPath: String = SingleInstanceLock.lockFilePath,
+        lockPath: String = SingleInstanceLock.resolvedLockFilePath,
         preflightAccess: () -> Bool = { CGPreflightScreenCaptureAccess() },
         windowProbe: () -> Bool = { ScreenCaptureOverlayController.hasLiveScreenCaptureAccess(preflight: { true }) }
     ) -> DiagnosticReport {

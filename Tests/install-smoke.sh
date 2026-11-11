@@ -29,6 +29,16 @@ case "$version_out" in
     *) echo "FAIL: --version output ($version_out) does not match VERSION ($expected_ver)" >&2; exit 1 ;;
 esac
 
+doctor_json=$("$install_dir/clipline" --doctor --json)
+case "$doctor_json" in
+    *"\"version\" : \"$expected_ver\""*) ;;
+    *) echo "FAIL: --doctor --json output did not contain expected version $expected_ver" >&2; exit 1 ;;
+esac
+if "$install_dir/clipline" --doctor --unknown-flag >/dev/null 2>&1; then
+    echo "FAIL: --doctor should reject unknown trailing flags" >&2
+    exit 1
+fi
+
 # Stand-in processes exercise path-scoped termination, not GUI/TCC state.
 mv "$install_dir/clipline" "$root/compiled-clipline"
 printf '#include <unistd.h>\nint main(void) { sleep(120); return 0; }\n' | \

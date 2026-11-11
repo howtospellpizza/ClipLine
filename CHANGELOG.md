@@ -4,7 +4,7 @@ All notable changes to **ClipLine** are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
-## [0.2.0] - 2026-11-11
+## [0.3.0] - 2026-11-11
 
 ### Added
 - **Horizontal clothesline stitch & Frame backdrop**: Added side-by-side (`Side`) stitching and optional dark framed backdrop with rounded corners and drop shadow.

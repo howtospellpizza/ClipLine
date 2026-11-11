@@ -75,10 +75,15 @@ if args.count >= 2 {
         print(ClipLineVersion.cliBanner)
         exit(0)
     } else if arg == "--doctor" {
+        let extraArgs = Array(args.dropFirst(2))
+        guard extraArgs.isEmpty || extraArgs == ["--json"] else {
+            fputs("[ClipLine] Error: Unknown option for --doctor. Usage: clipline --doctor [--json]\n", stderr)
+            exit(1)
+        }
         let report = MainActor.assumeIsolated {
             DiagnosticsService.collectReport()
         }
-        if args.contains("--json") {
+        if extraArgs == ["--json"] {
             if let json = try? report.formattedJSON() {
                 print(json)
             }

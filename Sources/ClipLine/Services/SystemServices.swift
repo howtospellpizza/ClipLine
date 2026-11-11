@@ -8,16 +8,24 @@ import Foundation
 enum SingleInstanceLock {
     private static var lockFD: Int32 = -1
 
-    static var lockFilePath: String {
+    static var resolvedLockFilePath: String {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        let dir = appSupport.appendingPathComponent("ClipLine", isDirectory: true)
+        return appSupport
+            .appendingPathComponent("ClipLine", isDirectory: true)
+            .appendingPathComponent("clipline_daemon.lock", isDirectory: false)
+            .path
+    }
+
+    static var lockFilePath: String {
+        let path = resolvedLockFilePath
+        let dir = URL(fileURLWithPath: path).deletingLastPathComponent()
         try? FileManager.default.createDirectory(
             at: dir,
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
-        return dir.appendingPathComponent("clipline_daemon.lock").path
+        return path
     }
 
     static func acquireOrNotifyExisting(path: String = lockFilePath, notifyExisting: Bool = true) -> Bool {

@@ -48,22 +48,29 @@ func runSuite9VersionAndDiagnosticsTests(_ t: TestHarness, testPasteboard: NSPas
         )
     }
     let tailAfterRotation = DiagnosticsService.readRecentLogLines(limit: 200, logFileURL: logFileURL)
+    let rotatedBytes = (try? FileManager.default.attributesOfItem(atPath: logFileURL.path)[.size] as? NSNumber)?.intValue ?? Int.max
     t.check(
-        tailAfterRotation.count <= 105 && tailAfterRotation.last?.contains("event_149") == true,
-        "DiagnosticsService.recordEvent rotates log file when size exceeds maxBytes (\(tailAfterRotation.count) lines retained)"
+        rotatedBytes <= 1024 && tailAfterRotation.count >= 5 && tailAfterRotation.last?.contains("event_149") == true,
+        "DiagnosticsService.recordEvent rotates log file within maxBytes budget (\(rotatedBytes)B <= 1024B, \(tailAfterRotation.count) lines retained)"
     )
 
-    // 3. collectReport produces accurate read-only text & JSON without touching live settings
+    // 3. collectReport produces accurate read-only text & JSON without creating directories/files or touching live settings
     let diagSuiteName = "ClipLineDoctorTests_\(UUID().uuidString)"
     if let diagDefaults = UserDefaults(suiteName: diagSuiteName) {
         defer { diagDefaults.removePersistentDomain(forName: diagSuiteName) }
-        let unlockedLockPath = testTempDirURL.appendingPathComponent("unlocked_doctor.lock").path
+        let nonExistentDir = testTempDirURL.appendingPathComponent("absent_support_dir", isDirectory: true)
+        let missingLockPath = nonExistentDir.appendingPathComponent("clipline_daemon.lock").path
         let report = DiagnosticsService.collectReport(
             defaults: diagDefaults,
             logFileURL: logFileURL,
-            lockPath: unlockedLockPath,
+            lockPath: missingLockPath,
             preflightAccess: { true },
             windowProbe: { true }
+        )
+        t.check(
+            !FileManager.default.fileExists(atPath: nonExistentDir.path) &&
+            !FileManager.default.fileExists(atPath: missingLockPath),
+            "DiagnosticsService.collectReport is strictly read-only and does not create missing lock directories or files"
         )
         t.check(
             report.version == ver &&
@@ -71,9 +78,37 @@ func runSuite9VersionAndDiagnosticsTests(_ t: TestHarness, testPasteboard: NSPas
             report.screenCapturePreflightGranted == true &&
             report.windowTitleProbeStatus == "authorized_or_inconclusive" &&
             report.configuredShortcuts["capture"] == "⌃X" &&
-            report.recentLogTail.count == 10,
+            report.recentLogTail.count <= 10 &&
+            !report.recentLogTail.isEmpty,
             "DiagnosticsService.collectReport gathers version, lock status, permissions, shortcuts, and log tail"
         )
+
+        // Verify held exclusive lock & denied window probe detection
+        let activeLockPath = testTempDirURL.appendingPathComponent("active_daemon.lock").path
+        let heldFD = open(activeLockPath, O_CREAT | O_RDWR, 0o600)
+        if heldFD >= 0 {
+            defer {
+                _ = flock(heldFD, LOCK_UN)
+                close(heldFD)
+            }
+            _ = flock(heldFD, LOCK_EX | LOCK_NB)
+            let heldReport = DiagnosticsService.collectReport(
+                defaults: diagDefaults,
+                logFileURL: logFileURL,
+                lockPath: activeLockPath,
+                preflightAccess: { false },
+                windowProbe: { false }
+            )
+            t.check(
+                heldReport.daemonLockHeldByRunningProcess == true &&
+                heldReport.screenCapturePreflightGranted == false &&
+                heldReport.windowTitleProbeStatus == "denied_on_external_windows",
+                "DiagnosticsService.collectReport detects active exclusive daemon lock without blocking and reports denied probe states"
+            )
+        } else {
+            t.check(false, "Opened temporary lock file for active-daemon probe test")
+        }
+
         let textOut = report.formattedText()
         let jsonOut = (try? report.formattedJSON()) ?? ""
         t.check(
