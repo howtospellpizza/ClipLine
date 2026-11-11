@@ -11,10 +11,6 @@ Capture screenshots, annotate them, and clip them to a floating clothesline at t
   <img src="assets/demo.gif" alt="ClipLine Demo" width="760">
 </p>
 
-<p align="center">
-  <img src="assets/features-demo.gif" alt="ClipLine feature demo: clipboard text cards, Spotlight, and side-by-side stitching with Frame" width="760">
-</p>
-
 ```
    ═══════🪵══════════════🪵══════════════🪵═══════
        ┌──────┐       ┌──────┐       ┌──────┐
@@ -113,6 +109,10 @@ Press `P` (or click the clothespin icon) to park the current pin on the clothesl
 - **Multi-photo drag & drop**: Drag a selected photo to drag **all currently selected photos** together (or drag an unselected photo to drag just that one) directly into Slack, WeChat, a browser, or Finder. Drag the top rope to reposition the clothesline bar.
 - **Unclip**: Double-click any thumbnail to return it to the canvas.
 
+<p align="center">
+  <img src="assets/demo-horizontal-stitch.gif" alt="Horizontal stitching with Frame enabled" width="760">
+</p>
+
 ### 3. Annotate, OCR, QR scan, and translate
 
 - **Tools**: Rectangle (hold `Shift` for 1:1 square), spotlight mask (darkens outside the selected region; multiple spotlights share one backdrop), arrow (hold `Shift` to snap `45°` angles), freehand pen, translucent highlighter (`.multiply` blend), auto-incrementing step counter (`① ② ③…`), mosaic (`CIPixellate`), text, and emoji sticker (quick emoji bar + macOS Character Palette `⌃⌘Space`), with 3 stroke sizes (`S` / `M` / `L` or `细` / `中` / `粗`) and 6 colors for applicable tools.
@@ -126,6 +126,10 @@ Press `P` (or click the clothespin icon) to park the current pin on the clothesl
   3. macOS system Translation service
   4. Browser translation (prompts once per destination domain before opening)
 
+<p align="center">
+  <img src="assets/demo-spotlight.gif" alt="Spotlight annotation dims everything outside the selected area" width="760">
+</p>
+
 ### 4. CLI triggers
 
 Use the full path `~/.local/bin/clipline` unless `~/.local/bin` is in your `PATH`:
@@ -137,6 +141,10 @@ Use the full path `~/.local/bin/clipline` unless `~/.local/bin` is in your `PATH
 ~/.local/bin/clipline --shortcuts   # print current global shortcuts as JSON
 ~/.local/bin/clipline --update      # update the invoked executable from official main
 ```
+
+<p align="center">
+  <img src="assets/demo-clipboard-text.gif" alt="Clipboard text pinned as a sticky note" width="760">
+</p>
 
 The capture and clipboard commands trigger a running daemon. Shortcut settings persist in the `io.github.clipline` UserDefaults suite.
 Carbon's exclusive registration detects conflicts with other exclusive Carbon hotkeys, but cannot detect every macOS, system, or app shortcut. If a binding does not work in a particular app, choose another one.
