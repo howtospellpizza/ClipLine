@@ -101,8 +101,12 @@ enum DiagnosticsService {
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
         let timestamp = ISO8601DateFormatter().string(from: Date())
-        let line = "[\(timestamp)] [v\(ClipLineVersion.current)] [\(sanitizedCategory)] \(sanitizedMessage)\n"
-        guard let data = line.data(using: .utf8) else { return }
+        var line = "[\(timestamp)] [v\(ClipLineVersion.current)] [\(sanitizedCategory)] \(sanitizedMessage)\n"
+        if maxBytes > 0, line.utf8.count > maxBytes {
+            let cappedPrefix = String(line.utf8.prefix(max(0, maxBytes - 1))) ?? ""
+            line = cappedPrefix + "\n"
+        }
+        guard let data = line.data(using: .utf8), data.count <= max(1, maxBytes) else { return }
 
         let dirURL = logFileURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)

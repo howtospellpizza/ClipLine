@@ -61,6 +61,20 @@ jobs:
           branch="chore/release-v${next}"
           today=$(date -u +%Y-%m-%d)
 
+          if gh pr view "$branch" >/dev/null 2>&1; then
+            echo "Release PR for $branch is already open — skipping branch overwrite to preserve any manual edits."
+            exit 0
+          fi
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "Remote branch $branch already exists without an open PR; opening PR from existing branch."
+            gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "chore(release): v${next}" \
+              --body "Automated version bump and changelog update for **v${next}**. Merging this PR after CI passes will automatically tag and publish the GitHub Release."
+            exit 0
+          fi
+
           git checkout -B "$branch"
           printf '%s\n' "$next" > VERSION
           printf '// Auto-generated from VERSION by Makefile — committed so `swift build` also works out of the box.\nlet ClipLineGeneratedBuildVersion = "%s"\n' "$next" > Sources/ClipLine/Services/GeneratedVersion.swift
@@ -75,14 +89,24 @@ jobs:
             [ -z "$commits" ] && commits="- Maintenance and stability improvements."
             tmp_cl=$(mktemp)
             awk -v ver="$next" -v dt="$today" -v notes="$commits" '
-              NR == 6 {
-                print ""
+              !inserted && /^## \[/ {
                 print "## [" ver "] - " dt
                 print ""
                 print "### Changed"
                 print notes
+                print ""
+                inserted = 1
               }
               { print }
+              END {
+                if (!inserted) {
+                  print ""
+                  print "## [" ver "] - " dt
+                  print ""
+                  print "### Changed"
+                  print notes
+                }
+              }
             ' CHANGELOG.md > "$tmp_cl"
             mv "$tmp_cl" CHANGELOG.md
           fi
@@ -91,19 +115,21 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add VERSION Sources/ClipLine/Services/GeneratedVersion.swift CHANGELOG.md
           git commit -m "chore(release): v${next}"
-          git push --force origin "$branch"
+          git push origin "$branch"
 
-          if ! gh pr view "$branch" >/dev/null 2>&1; then
-            gh pr create \
-              --base main \
-              --head "$branch" \
-              --title "chore(release): v${next}" \
-              --body "Automated version bump and changelog update for **v${next}**. Merging this PR after CI passes will automatically tag and publish the GitHub Release."
-          fi
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "chore(release): v${next}" \
+            --body "Automated version bump and changelog update for **v${next}**. Merging this PR after CI passes will automatically tag and publish the GitHub Release."
 
   publish-release:
     if: >-
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository) ||
       (github.event_name == 'workflow_dispatch' && inputs.bump == 'sync')
     runs-on: ubuntu-latest
     steps:
@@ -112,6 +138,27 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'main' }}
           fetch-depth: 0
+
+      - name: Verify commit is current main HEAD and has passing CI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          head_sha=$(git rev-parse HEAD)
+          main_sha=$(git ls-remote origin refs/heads/main | awk '{print $1}')
+          if [ "$head_sha" != "$main_sha" ]; then
+            echo "Checked-out commit ${head_sha} is behind current origin/main (${main_sha}); skipping stale run."
+            exit 0
+          fi
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            ci_ok=$(gh api "repos/${REPO}/commits/${head_sha}/check-runs" --jq '[.check_runs[] | select(.name == "build-and-test" and .status == "completed" and .conclusion == "success")] | length')
+            if [ "${ci_ok:-0}" -lt 1 ]; then
+              echo "Error: Commit ${head_sha} does not have a completed successful 'build-and-test' CI check run. Refusing to publish unverified commit." >&2
+              exit 1
+            fi
+          fi
 
       - name: Create Tag and GitHub Release if missing
         env:
@@ -129,7 +176,12 @@ jobs:
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             tag_sha=$(git rev-list -n 1 "${tag}")
             if [ "$tag_sha" != "$head_sha" ]; then
-              echo "Tag ${tag} already exists on ${tag_sha}; skipping tag push."
+              if gh release view "$tag" >/dev/null 2>&1; then
+                echo "Tag ${tag} and its GitHub Release already exist on earlier commit ${tag_sha} — nothing to do."
+                exit 0
+              fi
+              echo "Error: Tag ${tag} already exists on ${tag_sha} (current HEAD is ${head_sha}), and its GitHub Release is missing. Bump VERSION before releasing new commits." >&2
+              exit 1
             fi
           else
             git tag "$tag" "$head_sha"
