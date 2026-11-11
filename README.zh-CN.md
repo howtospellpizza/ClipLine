@@ -11,6 +11,10 @@ macOS 原生截图、标注与顶部“晾衣绳”贴图工具。
   <img src="assets/demo.gif" alt="ClipLine 演示动画" width="760">
 </p>
 
+<p align="center">
+  <img src="assets/features-demo.gif" alt="ClipLine 功能演示：剪贴板便签、聚光灯标注与加边距横向拼图" width="760">
+</p>
+
 ```
    ═══════🪵══════════════🪵══════════════🪵═══════
        ┌──────┐       ┌──────┐       ┌──────┐

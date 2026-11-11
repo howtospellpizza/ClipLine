@@ -11,6 +11,10 @@ Capture screenshots, annotate them, and clip them to a floating clothesline at t
   <img src="assets/demo.gif" alt="ClipLine Demo" width="760">
 </p>
 
+<p align="center">
+  <img src="assets/features-demo.gif" alt="ClipLine feature demo: clipboard text cards, Spotlight, and side-by-side stitching with Frame" width="760">
+</p>
+
 ```
    ═══════🪵══════════════🪵══════════════🪵═══════
        ┌──────┐       ┌──────┐       ┌──────┐
