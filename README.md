@@ -101,6 +101,14 @@ Use the configured capture shortcut (factory default `⌃X`):
 
 The screenshot stays pinned at the exact screen coordinates you selected. Before moving the pin or selecting a drawing tool (at `100%` zoom), drag any of the 8 handles or 4 edges to expand or shrink the crop against the original full-screen frame.
 
+<details>
+<summary>🎬 <b>Demo: Single-click window snap, HEX loupe & edge crop adjustment</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-capture-snap.gif" alt="Single-click window snap, HEX color loupe, and non-destructive crop resize" width="760">
+</p>
+</details>
+
 ### 2. Hang multiple pins on the clothesline
 
 Press `P` (or click the clothespin icon) to park the current pin on the clothesline at the top of your screen:
@@ -109,9 +117,21 @@ Press `P` (or click the clothespin icon) to park the current pin on the clothesl
 - **Multi-photo drag & drop**: Drag a selected photo to drag **all currently selected photos** together (or drag an unselected photo to drag just that one) directly into Slack, WeChat, a browser, or Finder. Drag the top rope to reposition the clothesline bar.
 - **Unclip**: Double-click any thumbnail to return it to the canvas.
 
+<details>
+<summary>🎬 <b>Demo: Park pins on the clothesline & drag multiple photos into Slack</b></summary>
+<br>
 <p align="center">
-  <img src="assets/demo-horizontal-stitch.gif" alt="Horizontal stitching with Frame enabled" width="760">
+  <img src="assets/demo-clothesline-drag.gif" alt="Park pins on the clothesline and drag multiple photos into Slack" width="760">
 </p>
+</details>
+
+<details open>
+<summary>🎬 <b>Demo: Vertical stitch, horizontal Side stitch & Framed padding</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-clothesline-stitch.gif" alt="Vertical stitch, horizontal Side stitch, and Framed padding on the clothesline" width="760">
+</p>
+</details>
 
 ### 3. Annotate, OCR, QR scan, and translate
 
@@ -126,9 +146,37 @@ Press `P` (or click the clothespin icon) to park the current pin on the clothesl
   3. macOS system Translation service
   4. Browser translation (prompts once per destination domain before opening)
 
+<details open>
+<summary>🎬 <b>Demo: Spotlight focus mask & 4-corner resize handles</b></summary>
+<br>
 <p align="center">
   <img src="assets/demo-spotlight.gif" alt="Spotlight annotation dims everything outside the selected area" width="760">
 </p>
+</details>
+
+<details>
+<summary>🎬 <b>Demo: Mosaic redaction & multiply-blend highlighter</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-mosaic-highlight.gif" alt="Mosaic pixelation and translucent highlighter" width="760">
+</p>
+</details>
+
+<details>
+<summary>🎬 <b>Demo: Quick emoji stickers, Character Palette & corner scaling</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-emoji-stickers.gif" alt="Emoji stickers and 4-corner handle resizing" width="760">
+</p>
+</details>
+
+<details>
+<summary>🎬 <b>Demo: Step counters, rectangle/arrow callouts & offline QR scan</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-annotate-qr.gif" alt="Step counters, rectangle and arrow annotations, and offline QR scan" width="760">
+</p>
+</details>
 
 ### 4. CLI triggers
 
@@ -142,9 +190,13 @@ Use the full path `~/.local/bin/clipline` unless `~/.local/bin` is in your `PATH
 ~/.local/bin/clipline --update      # update the invoked executable from official main
 ```
 
+<details open>
+<summary>🎬 <b>Demo: Pin clipboard text as an annotatable Retina sticky note (<code>⌃⌘V</code> / <code>--clipboard</code>)</b></summary>
+<br>
 <p align="center">
   <img src="assets/demo-clipboard-text.gif" alt="Clipboard text pinned as a sticky note" width="760">
 </p>
+</details>
 
 The capture and clipboard commands trigger a running daemon. Shortcut settings persist in the `io.github.clipline` UserDefaults suite.
 Carbon's exclusive registration detects conflicts with other exclusive Carbon hotkeys, but cannot detect every macOS, system, or app shortcut. If a binding does not work in a particular app, choose another one.

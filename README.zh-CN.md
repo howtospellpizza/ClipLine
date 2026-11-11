@@ -101,6 +101,14 @@ make uninstall
 
 截图完成后，贴图会直接停留在所选的屏幕坐标处。在移动窗口或选择标注工具前（`100%` 缩放比例下），拖拽四周的 8 个圆点或 4 条边，可基于原始全屏画面继续放大或缩小裁剪范围。
 
+<details>
+<summary>🎬 <b>演示：单击窗口智能吸附、HEX 像素取色器与边缘无损重裁</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-capture-snap.gif" alt="单击窗口智能吸附、HEX 像素取色器与边缘无损重裁演示" width="760">
+</p>
+</details>
+
 ### 2. 晾衣绳多图暂存
 
 按 `P`（或点击工具栏上的木夹图标）把当前贴图挂到屏幕顶部的晾衣绳：
@@ -109,9 +117,21 @@ make uninstall
 - **多图拖拽导出**：直接按住已选中的缩略图即可**将当前选中的多张图片一起拖入**微信、Slack、浏览器或 Finder（拖未选中的图片则仅导出该张）；按住顶部绳索可自由移动晾衣绳位置。
 - **取回编辑**：双击任意缩略图即可取回画布继续编辑。
 
+<details>
+<summary>🎬 <b>演示：挂上顶部晾衣绳并一并拖入 Slack 聊天窗口</b></summary>
+<br>
 <p align="center">
-  <img src="assets/demo-horizontal-stitch.gif" alt="开启加边距后的横向拼图演示" width="760">
+  <img src="assets/demo-clothesline-drag.gif" alt="将多张贴图挂上晾衣绳并一并拖入 Slack" width="760">
 </p>
+</details>
+
+<details open>
+<summary>🎬 <b>演示：纵向拼长图、横向并排拼图（Side）与深色加边距衬底（Frame）</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-clothesline-stitch.gif" alt="纵向拼长图、横向并排拼图与开启加边距衬底演示" width="760">
+</p>
+</details>
 
 ### 3. 标注、OCR、二维码识别与翻译
 
@@ -126,9 +146,37 @@ make uninstall
   3. macOS 系统翻译服务
   4. 默认浏览器网页翻译（每个外部域名首次打开前会弹窗确认）
 
+<details open>
+<summary>🎬 <b>演示：聚光灯（Spotlight）重点遮罩与四角无级缩放</b></summary>
+<br>
 <p align="center">
   <img src="assets/demo-spotlight.gif" alt="聚光灯标注重点区域并压暗选区外的画面" width="760">
 </p>
+</details>
+
+<details>
+<summary>🎬 <b>演示：像素马赛克打码与正片叠底荧光笔</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-mosaic-highlight.gif" alt="像素马赛克打码与半透明荧光笔标注演示" width="760">
+</p>
+</details>
+
+<details>
+<summary>🎬 <b>演示：快捷 Emoji 贴图、系统表情面板与四角无级缩放</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-emoji-stickers.gif" alt="Emoji 贴图放置与四角控制点无级缩放演示" width="760">
+</p>
+</details>
+
+<details>
+<summary>🎬 <b>演示：递增序号章、框选/箭头标注与离线二维码识别</b></summary>
+<br>
+<p align="center">
+  <img src="assets/demo-annotate-qr.gif" alt="递增序号章、框选箭头标注与离线二维码识别演示" width="760">
+</p>
+</details>
 
 ### 4. 命令行触发
 
@@ -142,9 +190,13 @@ make uninstall
 ~/.local/bin/clipline --update      # 从官方 main 更新当前调用的二进制文件
 ```
 
+<details open>
+<summary>🎬 <b>演示：将剪贴板纯文本一键贴成可标注的 Retina 便签卡片（<code>⌃⌘V</code> / <code>--clipboard</code>）</b></summary>
+<br>
 <p align="center">
   <img src="assets/demo-clipboard-text.gif" alt="将剪贴板文字贴成便签卡片的演示" width="760">
 </p>
+</details>
 
 截图与剪贴板命令会触发正在运行的守护进程。快捷键设置保存在 `io.github.clipline` UserDefaults 套件中。
 Carbon 独占注册只能检测其他使用独占 Carbon 注册的快捷键冲突，无法识别所有 macOS、系统或应用快捷键。如果某个快捷键在特定应用中不起作用，请改用其他组合。
