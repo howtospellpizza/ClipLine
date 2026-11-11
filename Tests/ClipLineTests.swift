@@ -2153,6 +2153,12 @@ func runAllTests() -> Int32 {
         bitsPerPixel: 0
     )!
     retinaRep1.size = NSSize(width: 200, height: 60)
+    let retinaPaintCtx = NSGraphicsContext(bitmapImageRep: retinaRep1)!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = retinaPaintCtx
+    NSColor.red.setFill()
+    NSRect(x: 0, y: 0, width: 200, height: 60).fill()
+    NSGraphicsContext.restoreGraphicsState()
     let retinaImg1 = NSImage(size: NSSize(width: 200, height: 60))
     retinaImg1.addRepresentation(retinaRep1)
 
@@ -2186,12 +2192,26 @@ func runAllTests() -> Int32 {
         detail: "got \(stitchedHoriz.size)"
     )
 
-    let singleFramed = ClipboardHelper.stitchImagesGrid([img1], padding: 20)
+    let singleFramed = ClipboardHelper.stitchImagesGrid([compositeRetina!], padding: 20)
     t.check(
         singleFramed.size == NSSize(width: 240, height: 100),
         "stitchImagesGrid applies outer frame padding even to a single image when padding > 0",
         detail: "got \(singleFramed.size)"
     )
+    if let framedTiff = singleFramed.tiffRepresentation,
+       let framedRep = NSBitmapImageRep(data: framedTiff),
+       let topRightCorner = framedRep.colorAt(x: framedRep.pixelsWide - 4, y: 4)?.usingColorSpace(.sRGB),
+       let bottomLeftCorner = framedRep.colorAt(x: 4, y: framedRep.pixelsHigh - 4)?.usingColorSpace(.sRGB),
+       let topImagePixel = framedRep.colorAt(x: framedRep.pixelsWide / 2, y: 50)?.usingColorSpace(.sRGB) {
+        t.check(
+            topRightCorner.alphaComponent > 0.98 &&
+                bottomLeftCorner.alphaComponent > 0.98 &&
+                topImagePixel.redComponent > 0.85,
+            "stitchImagesGrid scales 2x Retina CTM properly (no 1/4 bottom-left shrinkage) and fills all 4 frame corners without diagonal clipping"
+        )
+    } else {
+        t.check(false, "stitchImagesGrid Retina CTM and full-frame backdrop pixel check")
+    }
 
     // Verify Spotlight annotation tool darkens pixels outside spotlight rect while keeping inside bright,
     // and multiple spotlights do not compound exterior darkness
