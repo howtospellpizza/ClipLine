@@ -67,4 +67,9 @@ make uninstall HOME="$test_home"
 make install HOME="$test_home"
 "$install_dir/clipline" --help
 cmp build/clipline "$install_dir/clipline"
-printf 'PASS: scoped uninstall, repeat uninstall, spaced paths, and reinstall. Artifacts: %s\n' "$root"
+make install-service HOME="$test_home" CLIPLINE_SKIP_LAUNCHCTL=1
+plutil -lint "$test_home/Library/LaunchAgents/io.github.clipline.daemon.plist"
+make uninstall HOME="$test_home"
+test ! -e "$test_home/Library/LaunchAgents/io.github.clipline.daemon.plist"
+make install HOME="$test_home"
+printf 'PASS: scoped uninstall, repeat uninstall, spaced paths, LaunchAgent plist, and reinstall. Artifacts: %s\n' "$root"

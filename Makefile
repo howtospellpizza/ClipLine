@@ -9,7 +9,7 @@ TEST_SRC = $(shell find Tests -name '*.swift' | sort)
 MACOS_MIN_VERSION = 14.0
 TARGET = $(shell uname -m)-apple-macosx$(MACOS_MIN_VERSION)
 
-.PHONY: all sync-version build test test-install install uninstall clean
+.PHONY: all sync-version build test test-install install install-service uninstall clean
 
 all: build
 
@@ -35,6 +35,41 @@ install: build
 	@mkdir -p "$(INSTALL_DIR)"
 	install -m 755 build/$(BINARY_NAME) "$(INSTALL_DIR)/$(BINARY_NAME)"
 	@echo "✅ Installed to $(INSTALL_DIR)/$(BINARY_NAME)"
+
+install-service: install
+	@mkdir -p "$(HOME)/Library/LaunchAgents" "$(HOME)/Library/Logs/ClipLine"
+	@printf '%s\n' \
+		'<?xml version="1.0" encoding="UTF-8"?>' \
+		'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+		'<plist version="1.0">' \
+		'<dict>' \
+		'    <key>Label</key>' \
+		'    <string>$(PLIST_LABEL)</string>' \
+		'    <key>ProgramArguments</key>' \
+		'    <array>' \
+		'        <string>$(INSTALL_DIR)/$(BINARY_NAME)</string>' \
+		'    </array>' \
+		'    <key>RunAtLoad</key>' \
+		'    <true/>' \
+		'    <key>KeepAlive</key>' \
+		'    <dict>' \
+		'        <key>SuccessfulExit</key>' \
+		'        <false/>' \
+		'    </dict>' \
+		'    <key>ProcessType</key>' \
+		'    <string>Interactive</string>' \
+		'    <key>StandardOutPath</key>' \
+		'    <string>$(HOME)/Library/Logs/ClipLine/clipline-launchd.log</string>' \
+		'    <key>StandardErrorPath</key>' \
+		'    <string>$(HOME)/Library/Logs/ClipLine/clipline-launchd.log</string>' \
+		'</dict>' \
+		'</plist>' > "$(PLIST_PATH)"
+	@if [ "$${CLIPLINE_SKIP_LAUNCHCTL:-0}" != "1" ]; then \
+		launchctl bootout gui/$$(id -u) "$(PLIST_PATH)" 2>/dev/null || true; \
+		launchctl bootstrap gui/$$(id -u) "$(PLIST_PATH)"; \
+		launchctl kickstart -k gui/$$(id -u)/$(PLIST_LABEL); \
+	fi
+	@echo "✅ Installed and started LaunchAgent $(PLIST_PATH)"
 
 test-install: build
 	sh Tests/install-smoke.sh
