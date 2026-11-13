@@ -1,0 +1,238 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Open a version bump PR (patch, minor, major) or sync missing release for current main"
+        required: false
+        default: "patch"
+        type: choice
+        options:
+          - sync
+          - patch
+          - minor
+          - major
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  prepare-bump-pr:
+    if: github.event_name == 'workflow_dispatch' && inputs.bump != 'sync'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Open or update Version & Changelog PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUMP_TYPE: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          current=$(tr -d '[:space:]' < VERSION)
+          if ! [[ "$current" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Invalid VERSION format: $current" >&2
+            exit 1
+          fi
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+          patch="${BASH_REMATCH[3]}"
+          case "$BUMP_TYPE" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+            *) echo "Unsupported bump type: $BUMP_TYPE" >&2; exit 1 ;;
+          esac
+          next="${major}.${minor}.${patch}"
+          branch="chore/release-v${next}"
+          today=$(date -u +%Y-%m-%d)
+
+          pr_state=$(gh pr view "$branch" --json state --jq .state 2>/dev/null || true)
+          if [ "$pr_state" = "OPEN" ]; then
+            echo "Release PR for $branch is already open — skipping branch overwrite to preserve any manual edits."
+            exit 0
+          fi
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git fetch origin "$branch"
+            branch_ver=$(git show "FETCH_HEAD:VERSION" 2>/dev/null | tr -d '[:space:]' || true)
+            if [ "$branch_ver" != "$next" ]; then
+              echo "Error: Remote branch $branch exists with VERSION='${branch_ver}' (expected '${next}'). Reconcile or delete the stale branch first." >&2
+              exit 1
+            fi
+            if [ "$pr_state" = "CLOSED" ]; then
+              echo "Reopening closed release PR for $branch."
+              gh pr reopen "$branch"
+              exit 0
+            fi
+            echo "Remote branch $branch already exists without an open PR; opening PR from existing branch."
+            gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "chore(release): v${next}" \
+              --body "Automated version bump and changelog update for **v${next}**. Approve workflows on this PR if prompted, then merge after CI passes to automatically tag and publish the GitHub Release."
+            exit 0
+          fi
+
+          git checkout -B "$branch"
+          printf '%s\n' "$next" > VERSION
+          printf '// Auto-generated from VERSION by Makefile — committed so `swift build` also works out of the box.\nlet ClipLineGeneratedBuildVersion = "%s"\n' "$next" > Sources/ClipLine/Services/GeneratedVersion.swift
+
+          if ! grep -q "^## \[${next}\]" CHANGELOG.md; then
+            prev_tag=$(git describe --tags --abbrev=0 2>/dev/null || true)
+            if [ -n "$prev_tag" ]; then
+              commits=$(git log "${prev_tag}..HEAD" --no-merges --pretty=format:"- %s (%h)")
+            else
+              commits=$(git log -n 20 --no-merges --pretty=format:"- %s (%h)")
+            fi
+            [ -z "$commits" ] && commits="- Maintenance and stability improvements."
+            tmp_cl=$(mktemp)
+            awk -v ver="$next" -v dt="$today" -v notes="$commits" '
+              !inserted && /^## \[/ {
+                print "## [" ver "] - " dt
+                print ""
+                print "### Changed"
+                print notes
+                print ""
+                inserted = 1
+              }
+              { print }
+              END {
+                if (!inserted) {
+                  print ""
+                  print "## [" ver "] - " dt
+                  print ""
+                  print "### Changed"
+                  print notes
+                }
+              }
+            ' CHANGELOG.md > "$tmp_cl"
+            mv "$tmp_cl" CHANGELOG.md
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION Sources/ClipLine/Services/GeneratedVersion.swift CHANGELOG.md
+          git commit -m "chore(release): v${next}"
+          git push origin "$branch"
+
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "chore(release): v${next}" \
+            --body "Automated version bump and changelog update for **v${next}**. Approve workflows on this PR if prompted, then merge after CI passes to automatically tag and publish the GitHub Release."
+
+  publish-release:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' && inputs.bump == 'sync')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout verified main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'main' }}
+          fetch-depth: 0
+
+      - name: Verify commit is current main HEAD and has passing CI
+        id: verify
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          head_sha=$(git rev-parse HEAD)
+          main_sha=$(git ls-remote origin refs/heads/main | awk '{print $1}')
+          if [ "$head_sha" != "$main_sha" ]; then
+            echo "Checked-out commit ${head_sha} is behind current origin/main (${main_sha}); skipping stale run."
+            echo "verified=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            ci_ok=$(gh api "repos/${REPO}/actions/workflows/ci.yml/runs?event=push&branch=main&head_sha=${head_sha}" --jq '[.workflow_runs[] | select(.status == "completed" and .conclusion == "success" and .head_repository.full_name == "'"${REPO}"'")] | length')
+            if [ "${ci_ok:-0}" -lt 1 ]; then
+              echo "Error: Commit ${head_sha} does not have a completed successful push CI workflow run on main. Refusing to publish unverified commit." >&2
+              exit 1
+            fi
+          fi
+          echo "verified=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create Tag and GitHub Release if missing
+        if: steps.verify.outputs.verified == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ver=$(tr -d '[:space:]' < VERSION)
+          if ! [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid VERSION format: $ver" >&2
+            exit 1
+          fi
+          tag="v${ver}"
+          head_sha=$(git rev-parse HEAD)
+
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            tag_sha=$(git rev-list -n 1 "${tag}")
+            if [ "$tag_sha" != "$head_sha" ]; then
+              if gh release view "$tag" >/dev/null 2>&1; then
+                echo "Tag ${tag} and its GitHub Release already exist on earlier commit ${tag_sha} — nothing to do."
+                exit 0
+              fi
+              echo "Error: Tag ${tag} already exists on ${tag_sha} (current HEAD is ${head_sha}), and its GitHub Release is missing. Bump VERSION before releasing new commits." >&2
+              exit 1
+            fi
+          else
+            git tag "$tag" "$head_sha"
+            git push origin "$tag"
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "GitHub Release ${tag} already exists — nothing to do."
+            exit 0
+          fi
+
+          prev_tag=$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)
+          if [ -n "$prev_tag" ]; then
+            commits=$(git log "${prev_tag}..${tag}" --no-merges --pretty=format:"- %s (%h)")
+          else
+            commits=$(git log -n 30 "${tag}" --no-merges --pretty=format:"- %s (%h)")
+          fi
+
+          notes_file=$(mktemp)
+          {
+            echo "## ClipLine ${tag}"
+            echo ""
+            if [ -n "$commits" ]; then
+              echo "### Changes"
+              echo "$commits"
+              echo ""
+            fi
+            echo "### Install or Upgrade"
+            echo '```bash'
+            echo 'clipline --update'
+            echo '# or fresh install from source:'
+            echo 'git clone https://github.com/howtospellpizza/ClipLine.git && cd ClipLine && make install'
+            echo '```'
+          } > "$notes_file"
+
+          gh release create "$tag" --title "ClipLine ${tag}" --notes-file "$notes_file"

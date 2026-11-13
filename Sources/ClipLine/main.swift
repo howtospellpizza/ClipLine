@@ -61,6 +61,7 @@ if args.count >= 2 && args[1] == "--update" {
         print("[ClipLine] \(report.restartMessage)")
         exit(0)
     } catch {
+        DiagnosticsService.recordEvent(category: "update_error", message: "update_failed")
         fputs("[ClipLine] Error: \(error.localizedDescription)\n", stderr)
         exit(1)
     }
@@ -70,7 +71,27 @@ var startupSettingsRequested = false
 var startupLockAcquired = false
 if args.count >= 2 {
     let arg = args[1]
-    if arg == "-h" || arg == "--help" {
+    if arg == "-v" || arg == "--version" {
+        print(ClipLineVersion.cliBanner)
+        exit(0)
+    } else if arg == "--doctor" {
+        let extraArgs = Array(args.dropFirst(2))
+        guard extraArgs.isEmpty || extraArgs == ["--json"] else {
+            fputs("[ClipLine] Error: Unknown option for --doctor. Usage: clipline --doctor [--json]\n", stderr)
+            exit(1)
+        }
+        let report = MainActor.assumeIsolated {
+            DiagnosticsService.collectReport()
+        }
+        if extraArgs == ["--json"] {
+            if let json = try? report.formattedJSON() {
+                print(json)
+            }
+        } else {
+            print(report.formattedText())
+        }
+        exit(0)
+    } else if arg == "-h" || arg == "--help" {
         print("""
         Usage: clipline [options]
           (no args)        Start ClipLine background daemon (or trigger capture if already running)
@@ -78,7 +99,9 @@ if args.count >= 2 {
           -c, --clipboard  Pin current clipboard image or text card on screen
           --settings       Open keyboard shortcut settings (starts the daemon if needed)
           --shortcuts      Print current global shortcuts as JSON
+          --doctor         Print read-only local diagnostic report (add --json for JSON output)
           --update         Download, build, and install the latest official version
+          -v, --version    Print ClipLine version and target architecture
           -h, --help       Show this help message
         """)
         exit(0)

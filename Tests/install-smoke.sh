@@ -17,6 +17,27 @@ case "$help" in
     *"--update"*) ;;
     *) echo "FAIL: --help does not list --update" >&2; exit 1 ;;
 esac
+case "$help" in
+    *"--doctor"*) ;;
+    *) echo "FAIL: --help does not list --doctor" >&2; exit 1 ;;
+esac
+version_out=$("$install_dir/clipline" --version)
+printf '%s\n' "$version_out"
+expected_ver=$(tr -d '[:space:]' < VERSION)
+case "$version_out" in
+    "ClipLine $expected_ver "*) ;;
+    *) echo "FAIL: --version output ($version_out) does not match VERSION ($expected_ver)" >&2; exit 1 ;;
+esac
+
+doctor_json=$("$install_dir/clipline" --doctor --json)
+case "$doctor_json" in
+    *"\"version\" : \"$expected_ver\""*) ;;
+    *) echo "FAIL: --doctor --json output did not contain expected version $expected_ver" >&2; exit 1 ;;
+esac
+if "$install_dir/clipline" --doctor --unknown-flag >/dev/null 2>&1; then
+    echo "FAIL: --doctor should reject unknown trailing flags" >&2
+    exit 1
+fi
 
 # Stand-in processes exercise path-scoped termination, not GUI/TCC state.
 mv "$install_dir/clipline" "$root/compiled-clipline"
@@ -31,7 +52,7 @@ sleep 1
 kill -0 "$installed_pid"
 kill -0 "$other_pid"
 
-make uninstall HOME="$test_home"
+make uninstall HOME="$test_home" CLIPLINE_SKIP_LAUNCHCTL=1
 sleep 1
 if kill -0 "$installed_pid" 2>/dev/null; then
     echo "FAIL: uninstall did not stop the installed process" >&2
@@ -41,9 +62,14 @@ wait "$installed_pid" 2>/dev/null || true
 installed_pid=
 test ! -e "$install_dir/clipline"
 kill -0 "$other_pid"
-make uninstall HOME="$test_home"
+make uninstall HOME="$test_home" CLIPLINE_SKIP_LAUNCHCTL=1
 
 make install HOME="$test_home"
 "$install_dir/clipline" --help
 cmp build/clipline "$install_dir/clipline"
-printf 'PASS: scoped uninstall, repeat uninstall, spaced paths, and reinstall. Artifacts: %s\n' "$root"
+make install-service HOME="$test_home" CLIPLINE_SKIP_LAUNCHCTL=1
+plutil -lint "$test_home/Library/LaunchAgents/io.github.clipline.daemon.plist"
+make uninstall HOME="$test_home" CLIPLINE_SKIP_LAUNCHCTL=1
+test ! -e "$test_home/Library/LaunchAgents/io.github.clipline.daemon.plist"
+make install HOME="$test_home"
+printf 'PASS: scoped uninstall, repeat uninstall, spaced paths, LaunchAgent plist, and reinstall. Artifacts: %s\n' "$root"

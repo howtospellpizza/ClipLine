@@ -173,11 +173,15 @@ Press `⌃⌘V` (or run `~/.local/bin/clipline --clipboard`):
 ```bash
 git clone https://github.com/howtospellpizza/ClipLine.git
 cd ClipLine
+make install-service   # installs ~/.local/bin/clipline + starts LaunchAgent for auto-start on login
+```
+
+Or if you only want to install the binary without registering a LaunchAgent:
+
+```bash
 make install
 nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
 ```
-
-> **Note**: This starts `clipline` in the background for the current session. It does not automatically register a login item or guarantee launch on system startup.
 
 Click the keyboard icon (`⌨️`) on any pin toolbar (or press `⌘,` on a pin window, or run `~/.local/bin/clipline --settings`) to view or edit all global shortcuts. Factory defaults: `⌃X` captures a region, `⌘⇧X` is the secondary capture shortcut, and `⌃⌘V` pins the clipboard image or plain text.
 
@@ -219,7 +223,7 @@ make install
 
 - If `git pull --ff-only` fails due to local changes, resolve your working tree before updating.
 - Restart the daemon manually after saving active pins; `make install` does not restart it.
-- `clipline --update` is a CLI command; `make update`, `make version`, and service-management Make targets do not exist.
+- `clipline --update` is a CLI command; `make install-service` installs and starts the LaunchAgent (`~/Library/LaunchAgents/io.github.clipline.daemon.plist`), while `make update` and `make version` do not exist.
 
 ### Uninstall
 
@@ -245,6 +249,8 @@ Use the full path `~/.local/bin/clipline` unless `~/.local/bin` is in your `PATH
 ~/.local/bin/clipline --clipboard   # pin current clipboard image (or plain text as a sticky note)
 ~/.local/bin/clipline --settings    # open shortcut settings (starts the daemon if needed)
 ~/.local/bin/clipline --shortcuts   # print current global shortcuts as JSON
+~/.local/bin/clipline --doctor      # print read-only local diagnostic report (add --json for JSON)
+~/.local/bin/clipline --version     # print ClipLine version and target architecture
 ~/.local/bin/clipline --update      # update the invoked executable from official main
 ```
 
@@ -319,11 +325,12 @@ export CLIP_LINE_TRANSLATE_URL="https://www.deepl.com/translator#en/zh/{text}"
 ## Development
 
 ```bash
-make build        # compile release binary to ./build/clipline
-make test         # run unit & AppKit checks (uses isolated shortcut settings, pasteboard, and temp directory)
-make test-install # check scoped uninstall and reinstall in an isolated directory
-make uninstall    # stop daemon and remove ~/.local/bin/clipline
-make clean        # remove ./build
+make build                    # compile release binary to ./build/clipline
+make test                     # run all 9 unit & AppKit suites (isolated pasteboard & temp directory)
+make test FILTER="Suite 5"    # run only matching test suite(s)
+make test-install             # check scoped uninstall and reinstall in an isolated directory
+make uninstall                # stop daemon and remove ~/.local/bin/clipline
+make clean                    # remove ./build
 ```
 
 ## License
