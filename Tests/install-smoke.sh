@@ -52,7 +52,7 @@ sleep 1
 kill -0 "$installed_pid"
 kill -0 "$other_pid"
 
-make uninstall HOME="$test_home"
+make uninstall HOME="$test_home" CLIPLINE_SKIP_LAUNCHCTL=1
 sleep 1
 if kill -0 "$installed_pid" 2>/dev/null; then
     echo "FAIL: uninstall did not stop the installed process" >&2
@@ -62,14 +62,14 @@ wait "$installed_pid" 2>/dev/null || true
 installed_pid=
 test ! -e "$install_dir/clipline"
 kill -0 "$other_pid"
-make uninstall HOME="$test_home"
+make uninstall HOME="$test_home" CLIPLINE_SKIP_LAUNCHCTL=1
 
 make install HOME="$test_home"
 "$install_dir/clipline" --help
 cmp build/clipline "$install_dir/clipline"
 make install-service HOME="$test_home" CLIPLINE_SKIP_LAUNCHCTL=1
 plutil -lint "$test_home/Library/LaunchAgents/io.github.clipline.daemon.plist"
-make uninstall HOME="$test_home"
+make uninstall HOME="$test_home" CLIPLINE_SKIP_LAUNCHCTL=1
 test ! -e "$test_home/Library/LaunchAgents/io.github.clipline.daemon.plist"
 make install HOME="$test_home"
 printf 'PASS: scoped uninstall, repeat uninstall, spaced paths, LaunchAgent plist, and reinstall. Artifacts: %s\n' "$root"

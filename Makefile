@@ -66,6 +66,11 @@ install-service: install
 		'</plist>' > "$(PLIST_PATH)"
 	@if [ "$${CLIPLINE_SKIP_LAUNCHCTL:-0}" != "1" ]; then \
 		launchctl bootout gui/$$(id -u) "$(PLIST_PATH)" 2>/dev/null || true; \
+		for pid in $$(pgrep -u $$(id -u) -x $(BINARY_NAME)); do \
+			if [ "$$(ps -p $$pid -o comm=)" = "$(INSTALL_DIR)/$(BINARY_NAME)" ]; then \
+				kill "$$pid" 2>/dev/null || true; \
+			fi; \
+		done; \
 		launchctl bootstrap gui/$$(id -u) "$(PLIST_PATH)"; \
 		launchctl kickstart -k gui/$$(id -u)/$(PLIST_LABEL); \
 	fi
@@ -75,8 +80,8 @@ test-install: build
 	sh Tests/install-smoke.sh
 
 uninstall:
-	@if [ -f "$(PLIST_PATH)" ]; then \
-		launchctl bootout gui/$$(id -u) "$(PLIST_PATH)" 2>/dev/null || true; \
+	@if [ -f "$(PLIST_PATH)" ] && [ "$${CLIPLINE_SKIP_LAUNCHCTL:-0}" != "1" ]; then \
+		launchctl bootout gui/$$(id -u)/$(PLIST_LABEL) 2>/dev/null || launchctl bootout gui/$$(id -u) "$(PLIST_PATH)" 2>/dev/null || true; \
 	fi
 	@for pid in $$(pgrep -u $$(id -u) -x $(BINARY_NAME)); do \
 		if [ "$$(ps -p $$pid -o comm=)" = "$(INSTALL_DIR)/$(BINARY_NAME)" ]; then \
