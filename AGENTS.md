@@ -17,7 +17,7 @@
 - `Services/`: `SystemServices.swift` (pasteboard, `stitchImagesGrid`, `renderTextCardImage`, translation URL builder, temp file hygiene), `KeyboardShortcuts.swift`, `Localization.swift` (`en` / `zh-Hans`), `ClipLineUpdater.swift`, `Version.swift`, and `DiagnosticsService.swift`.
 
 ## 3. Coordinate & Retina Invariants (Must Not Regress)
-- **Normalized annotation coordinates**: `PinAnnotation.points` are stored in `[0, 1] × [0, 1]` relative to `PinSessionViewModel.baseSize`, with **bottom-left origin** (`y = 0` at bottom, `y = 1` at top) matching AppKit `NSView` coordinates (`isFlipped == false`).
+- **Normalized annotation coordinates**: `PinAnnotation.points` are stored in `[0, 1] × [0, 1]` relative to `PinSessionViewModel.baseSize`, with **top-left origin** (`y = 0` at top, `y = 1` at bottom; converted to AppKit's bottom-left `NSView` coordinates via `imgRect.maxY - pt.y * imgRect.height`).
 - **2x Retina `NSBitmapImageRep` CTM**: Whenever creating a 2x Retina bitmap buffer (`pixelsWide = width * 2`, `pixelsHigh = height * 2`), **always set `rep.size = targetPointSize` BEFORE calling `NSGraphicsContext(bitmapImageRep: rep)`** so the CoreGraphics context CTM scales 1pt → 2px across the full buffer.
 - **CoreGraphics linear gradients**: When drawing diagonal gradients across a rounded rect, pass `[.drawsBeforeStartLocation, .drawsAfterEndLocation]` so corners outside the gradient axis perpendiculars are never clipped.
 - **Dual-panel focus & z-order**: `PinFloatingPanel` and `PinToolbarPanel` intentionally omit `.nonactivatingPanel` so WindowServer CPS focus stays consistent and keyboard shortcuts (`⌘Z`, `Delete`, `Return`, `Esc`, `P`) work immediately on click.

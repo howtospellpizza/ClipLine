@@ -1152,6 +1152,33 @@ func runSuite4PinToolbarAndCanvasTests(_ t: TestHarness, testPasteboard: NSPaste
                 redoneArrowPts == updatedArrowPts,
                 "vm.redo() restores the adjusted .arrow endpoint after vm.undo()"
             )
+            if let tailHandlePt = canvas.selectedAnnotationCornerHandlesInView().first(where: { $0.0 == .topLeft })?.1,
+               let tDown = NSEvent.mouseEvent(
+                with: .leftMouseDown, location: tailHandlePt, modifierFlags: [],
+                timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 76, clickCount: 1, pressure: 1.0
+               ),
+               let tDrag = NSEvent.mouseEvent(
+                with: .leftMouseDragged, location: NSPoint(x: tailHandlePt.x - 20, y: tailHandlePt.y + 14), modifierFlags: [],
+                timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 77, clickCount: 1, pressure: 1.0
+               ),
+               let tUp = NSEvent.mouseEvent(
+                with: .leftMouseUp, location: NSPoint(x: tailHandlePt.x - 20, y: tailHandlePt.y + 14), modifierFlags: [],
+                timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 78, clickCount: 1, pressure: 1.0
+               ) {
+                let tipBeforeTailDrag = updatedArrowPts[1]
+                canvas.mouseDown(with: tDown)
+                canvas.mouseDragged(with: tDrag)
+                canvas.mouseUp(with: tUp)
+                let tailAdjustedPts = vm.annotations.first(where: { $0.id == rArrow.id })?.points ?? []
+                t.check(
+                    tailAdjustedPts.count == 2 &&
+                    tailAdjustedPts[0].x < 0.22 &&
+                    abs(tailAdjustedPts[1].x - tipBeforeTailDrag.x) < 0.002 &&
+                    abs(tailAdjustedPts[1].y - tipBeforeTailDrag.y) < 0.002,
+                    "Dragging .arrow tail handle (.topLeft) repositions tail while keeping tip endpoint fixed",
+                    detail: "pts=\(tailAdjustedPts)"
+                )
+            }
             // Recording a new undo snapshot clears redoHistory
             vm.undo()
             t.check(vm.canRedo, "canRedo is true after undo")

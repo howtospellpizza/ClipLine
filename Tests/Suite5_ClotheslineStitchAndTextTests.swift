@@ -422,7 +422,7 @@ func runSuite5ClotheslineStitchAndTextTests(_ t: TestHarness, testPasteboard: NS
         "cleanupStaleTempFiles preserves non-ClipLine files in target directory"
     )
 
-    // Verify ClotheslineManager.moveItem(_:by:) reorders items, clamps out-of-range moves, and updates stitched order
+    // Verify ClotheslineManager drag-and-drop reordering lifecycle (preview -> drop commit, and preview -> cancel/external drag rollback)
     let clManager = ClotheslineManager.shared
     clManager.clearAll()
     let prevPBProvider = clManager.pasteboardProvider
@@ -433,26 +433,41 @@ func runSuite5ClotheslineStitchAndTextTests(_ t: TestHarness, testPasteboard: NS
     let itemA = ClippedPinItem(id: UUID(), sessionVM: PinSessionViewModel(image: img1), compositeImage: img1, tiltAngle: 0)
     let itemB = ClippedPinItem(id: UUID(), sessionVM: PinSessionViewModel(image: img2), compositeImage: img2, tiltAngle: 0)
     clManager.items = [itemA, itemB]
-    clManager.moveItem(itemA.id, by: -1)
+    testPasteboard.clearContents()
+    testPasteboard.setString("keep-clipboard-during-hover", forType: .string)
+    let changeCountBeforeHover = testPasteboard.changeCount
+
+    // 1. Hovering during drag previews reorder without mutating clipboard; canceling/ending without drop restores original order
+    clManager.beginDragReorderSession()
+    clManager.previewReorder(draggedID: itemB.id, targetID: itemA.id)
     t.check(
-        clManager.items.map(\.id) == [itemA.id, itemB.id],
-        "moveItem with negative offset at index 0 is a safe no-op"
+        clManager.items.map(\.id) == [itemB.id, itemA.id] &&
+        testPasteboard.changeCount == changeCountBeforeHover,
+        "previewReorder reorders items visually during hover without overwriting clipboard"
     )
-    clManager.moveItem(itemB.id, by: -1)
+    clManager.endDragReorderSession()
     t.check(
-        clManager.items.map(\.id) == [itemB.id, itemA.id],
-        "moveItem(itemB.id, by: -1) moves second photo before first photo on the clothesline"
+        clManager.items.map(\.id) == [itemA.id, itemB.id] &&
+        testPasteboard.string(forType: .string) == "keep-clipboard-during-hover",
+        "Ending drag session without a drop on clothesline rolls back provisional hover reorder and preserves clipboard"
     )
-    clManager.moveItem(itemB.id, by: 1)
+
+    // 2. Hovering onto target card followed by dropping on the same card commits [B, A] once (does not double-swap back to [A, B])
+    let viewA = ClotheslinePhotoDragNSView(frame: NSRect(x: 0, y: 0, width: 90, height: 64))
+    viewA.item = itemA
+    ClotheslinePhotoDragNSView.activeDraggedItemID = itemB.id
+    clManager.beginDragReorderSession()
+    clManager.previewReorder(draggedID: itemB.id, targetID: itemA.id)
+    let changeCountBeforeCommit = testPasteboard.changeCount
+    clManager.commitReorderDrop(draggedID: itemB.id, targetID: itemA.id)
+    clManager.endDragReorderSession()
+    ClotheslinePhotoDragNSView.activeDraggedItemID = nil
     t.check(
-        clManager.items.map(\.id) == [itemA.id, itemB.id],
-        "moveItem(itemB.id, by: 1) moves first photo back to index 1"
+        clManager.items.map(\.id) == [itemB.id, itemA.id] &&
+        testPasteboard.changeCount > changeCountBeforeCommit,
+        "Dropping after hover preview commits [B, A] without double-swapping back to [A, B] and syncs clipboard once"
     )
-    clManager.reorderItem(draggedID: itemB.id, targetID: itemA.id)
-    t.check(
-        clManager.items.map(\.id) == [itemB.id, itemA.id],
-        "reorderItem(draggedID:targetID:) reorders dragged card to target card slot during clothesline drag"
-    )
+
     clManager.reorderItem(draggedID: itemB.id, targetID: itemB.id)
     t.check(
         clManager.items.map(\.id) == [itemB.id, itemA.id],

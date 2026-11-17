@@ -22,9 +22,10 @@ final class ClotheslineManager: ObservableObject {
     @Published var items: [ClippedPinItem] = []
     @Published var toastMessage: String? = nil
     @Published var isFramedPaddingEnabled: Bool = false
-    @Published var draggingItemID: UUID? = nil
 
     private(set) var dockPanel: NSPanel?
+    private var dragSnapshotItems: [ClippedPinItem]? = nil
+    private var didCommitReorderDrop: Bool = false
 
     var selectedItems: [ClippedPinItem] {
         items.filter(\.isSelected)
@@ -221,26 +222,55 @@ final class ClotheslineManager: ObservableObject {
         updateDockVisibility()
     }
 
-    func moveItem(_ id: UUID, by offset: Int) {
-        guard offset != 0,
-              let fromIndex = items.firstIndex(where: { $0.id == id }) else { return }
-        let toIndex = max(0, min(items.count - 1, fromIndex + offset))
-        guard toIndex != fromIndex else { return }
+    @discardableResult
+    func reorderItem(draggedID: UUID, targetID: UUID, syncClipboard: Bool = true) -> Bool {
+        guard draggedID != targetID,
+              let fromIndex = items.firstIndex(where: { $0.id == draggedID }),
+              let toIndex = items.firstIndex(where: { $0.id == targetID }) else { return false }
         let moved = items.remove(at: fromIndex)
         items.insert(moved, at: toIndex)
-        if !selectedItems.isEmpty {
+        if syncClipboard && !selectedItems.isEmpty {
+            syncSelectedToClipboard(silent: true)
+        }
+        return true
+    }
+
+    func beginDragReorderSession() {
+        dragSnapshotItems = items
+        didCommitReorderDrop = false
+    }
+
+    func previewReorder(draggedID: UUID, targetID: UUID) {
+        if dragSnapshotItems == nil {
+            beginDragReorderSession()
+        }
+        _ = reorderItem(draggedID: draggedID, targetID: targetID, syncClipboard: false)
+    }
+
+    func commitReorderDrop(draggedID: UUID, targetID: UUID) {
+        if dragSnapshotItems == nil {
+            beginDragReorderSession()
+        }
+        let initialIDs = dragSnapshotItems?.map(\.id) ?? items.map(\.id)
+        if items.map(\.id) == initialIDs && draggedID != targetID {
+            _ = reorderItem(draggedID: draggedID, targetID: targetID, syncClipboard: false)
+        }
+        didCommitReorderDrop = true
+        let changed = items.map(\.id) != initialIDs
+        dragSnapshotItems = nil
+        if changed && !selectedItems.isEmpty {
             syncSelectedToClipboard(silent: true)
         }
     }
 
-    func reorderItem(draggedID: UUID, targetID: UUID) {
-        guard draggedID != targetID,
-              let fromIndex = items.firstIndex(where: { $0.id == draggedID }),
-              let toIndex = items.firstIndex(where: { $0.id == targetID }) else { return }
-        let moved = items.remove(at: fromIndex)
-        items.insert(moved, at: toIndex)
-        if !selectedItems.isEmpty {
-            syncSelectedToClipboard(silent: true)
+    func endDragReorderSession() {
+        defer {
+            dragSnapshotItems = nil
+            didCommitReorderDrop = false
+        }
+        guard !didCommitReorderDrop, let snapshot = dragSnapshotItems else { return }
+        if items.map(\.id) != snapshot.map(\.id) {
+            items = snapshot
         }
     }
 
@@ -705,6 +735,7 @@ final class ClotheslinePhotoDragNSView: NSView, NSDraggingSource {
     }
 
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        ClotheslineManager.shared.endDragReorderSession()
         Self.activeDraggedItemID = nil
     }
 
@@ -715,7 +746,7 @@ final class ClotheslinePhotoDragNSView: NSView, NSDraggingSource {
         }
         if draggedID != targetID {
             withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
-                ClotheslineManager.shared.reorderItem(draggedID: draggedID, targetID: targetID)
+                ClotheslineManager.shared.previewReorder(draggedID: draggedID, targetID: targetID)
             }
         }
         return .move
@@ -730,10 +761,8 @@ final class ClotheslinePhotoDragNSView: NSView, NSDraggingSource {
               let targetID = item?.id else {
             return false
         }
-        if draggedID != targetID {
-            withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
-                ClotheslineManager.shared.reorderItem(draggedID: draggedID, targetID: targetID)
-            }
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
+            ClotheslineManager.shared.commitReorderDrop(draggedID: draggedID, targetID: targetID)
         }
         return true
     }
@@ -758,9 +787,11 @@ final class ClotheslinePhotoDragNSView: NSView, NSDraggingSource {
         didStartDrag = true
         cancelPendingSingleTap()
         Self.activeDraggedItemID = item.id
+        ClotheslineManager.shared.beginDragReorderSession()
 
         let exported = ClotheslineManager.shared.writeDragExportFiles(startingFrom: item)
         guard !exported.isEmpty else {
+            ClotheslineManager.shared.endDragReorderSession()
             Self.activeDraggedItemID = nil
             return
         }
