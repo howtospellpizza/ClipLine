@@ -41,6 +41,7 @@ final class PinSessionViewModel: ObservableObject {
 
     @Published var annotations: [PinAnnotation] = []
     private(set) var undoHistory: [[PinAnnotation]] = []
+    private(set) var redoHistory: [[PinAnnotation]] = []
     private var hasUsedUndoHistory = false
     @Published var currentDragPoints: [CGPoint] = []
     var isSyncingToolbarFromSelection: Bool = false
@@ -404,12 +405,17 @@ final class PinSessionViewModel: ObservableObject {
         !undoHistory.isEmpty || (!hasUsedUndoHistory && !annotations.isEmpty)
     }
 
+    var canRedo: Bool {
+        !redoHistory.isEmpty
+    }
+
     func recordUndoSnapshot() {
         hasUsedUndoHistory = true
         undoHistory.append(annotations)
         if undoHistory.count > 100 {
             undoHistory.removeFirst()
         }
+        redoHistory.removeAll()
     }
 
     func syncToolbarWithSelectedAnnotation() {
@@ -503,6 +509,10 @@ final class PinSessionViewModel: ObservableObject {
     func undo() {
         hostingPanel?.canvasView?.cancelActiveAnnotationDrag()
         if let previous = undoHistory.popLast() {
+            redoHistory.append(annotations)
+            if redoHistory.count > 100 {
+                redoHistory.removeFirst()
+            }
             annotations = previous
             if let selID = selectedTextAnnotationID,
                !annotations.contains(where: { $0.id == selID }) {
@@ -518,6 +528,10 @@ final class PinSessionViewModel: ObservableObject {
             return
         }
         if !hasUsedUndoHistory && !annotations.isEmpty {
+            redoHistory.append(annotations)
+            if redoHistory.count > 100 {
+                redoHistory.removeFirst()
+            }
             let removed = annotations.popLast()
             if removed?.id == selectedTextAnnotationID {
                 selectedTextAnnotationID = nil
@@ -531,6 +545,28 @@ final class PinSessionViewModel: ObservableObject {
             }
             updateToolbarPanelPosition()
         }
+    }
+
+    func redo() {
+        hostingPanel?.canvasView?.cancelActiveAnnotationDrag()
+        guard let next = redoHistory.popLast() else { return }
+        hasUsedUndoHistory = true
+        undoHistory.append(annotations)
+        if undoHistory.count > 100 {
+            undoHistory.removeFirst()
+        }
+        annotations = next
+        if let selID = selectedTextAnnotationID,
+           !annotations.contains(where: { $0.id == selID }) {
+            selectedTextAnnotationID = nil
+        } else {
+            syncToolbarWithSelectedAnnotation()
+        }
+        if let cv = hostingPanel?.canvasView {
+            cv.window?.invalidateCursorRects(for: cv)
+            cv.needsDisplay = true
+        }
+        updateToolbarPanelPosition()
     }
 
     @discardableResult
