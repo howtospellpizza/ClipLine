@@ -173,11 +173,15 @@ macOS 原生截图、标注与顶部“晾衣绳”贴图工具。
 ```bash
 git clone https://github.com/howtospellpizza/ClipLine.git
 cd ClipLine
+make install-service   # 安装 ~/.local/bin/clipline 并注册 LaunchAgent 开机自启
+```
+
+或者仅安装二进制文件而不注册开机自启：
+
+```bash
 make install
 nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
 ```
-
-> **注意**：该命令会在当前会话后台启动 `clipline`，不会自动注册登录项，亦不保证开机自启。
 
 点击截图工具栏右侧的键盘图标 `⌨️`（或在贴图窗口按 `⌘,`，或运行 `~/.local/bin/clipline --settings`），即可查看或编辑全部全局快捷键。出厂默认值：`⌃X` 框选截图，`⌘⇧X` 为备用截图快捷键，`⌃⌘V` 将剪贴板图片或纯文本便签贴到屏幕上。
 
@@ -219,7 +223,7 @@ make install
 
 - 若 `git pull --ff-only` 因本地修改报错，请先处理工作区改动后再更新。
 - 保存活动贴图后，请手动重启守护进程；`make install` 不会重启它。
-- `clipline --update` 是命令行功能；Makefile 中不存在 `make update`、`make version` 或服务管理相关的 target。
+- `clipline --update` 是命令行功能；`make install-service` 会安装并启动 LaunchAgent（`~/Library/LaunchAgents/io.github.clipline.daemon.plist`），而 Makefile 中不存在 `make update` 或 `make version`。
 
 ### 卸载
 
@@ -245,7 +249,9 @@ make uninstall
 ~/.local/bin/clipline --clipboard   # 将剪贴板中的图片（或纯文本便签卡片）贴到屏幕上
 ~/.local/bin/clipline --settings    # 打开快捷键设置（必要时启动守护进程）
 ~/.local/bin/clipline --shortcuts   # 以 JSON 输出当前全局快捷键
+~/.local/bin/clipline --doctor      # 输出只读本地诊断报告（可附加 --json 输出 JSON）
 ~/.local/bin/clipline --update      # 从官方 main 更新当前调用的二进制文件
+~/.local/bin/clipline --version     # 输出版本号与目标架构
 ```
 
 截图与剪贴板命令会触发正在运行的守护进程。快捷键设置保存在 `io.github.clipline` UserDefaults 套件中。

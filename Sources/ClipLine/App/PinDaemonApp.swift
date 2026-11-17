@@ -41,7 +41,15 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
         let launchFailures = runtime.registerAtLaunch()
         for failure in launchFailures {
             fputs("[ClipLine] Warning: Failed to register \(failure.action.rawValue) hotkey (OSStatus \(failure.status))\n", stderr)
+            DiagnosticsService.recordEvent(
+                category: "hotkey_failure",
+                message: "action=\(failure.action.rawValue) status=\(failure.status)"
+            )
         }
+        DiagnosticsService.recordEvent(
+            category: "launch",
+            message: "daemon_started hotkeys_failed=\(launchFailures.count)"
+        )
         shortcutSettingsModel = ShortcutSettingsModel(
             store: shortcutStore,
             runtime: runtime,
@@ -206,6 +214,10 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
+        let versionItem = NSMenuItem(title: "ClipLine v\(ClipLineVersion.current)", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
+        menu.addItem(.separator())
         menu.addItem(menuItem(L10n.shortcutMenuCapture, action: #selector(menuCapture(_:))))
         menu.addItem(menuItem(L10n.shortcutMenuClipboard, action: #selector(menuClipboard(_:))))
         menu.addItem(.separator())

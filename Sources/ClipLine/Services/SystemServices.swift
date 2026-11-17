@@ -8,16 +8,24 @@ import Foundation
 enum SingleInstanceLock {
     private static var lockFD: Int32 = -1
 
-    static var lockFilePath: String {
+    static var resolvedLockFilePath: String {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        let dir = appSupport.appendingPathComponent("ClipLine", isDirectory: true)
+        return appSupport
+            .appendingPathComponent("ClipLine", isDirectory: true)
+            .appendingPathComponent("clipline_daemon.lock", isDirectory: false)
+            .path
+    }
+
+    static var lockFilePath: String {
+        let path = resolvedLockFilePath
+        let dir = URL(fileURLWithPath: path).deletingLastPathComponent()
         try? FileManager.default.createDirectory(
             at: dir,
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
-        return dir.appendingPathComponent("clipline_daemon.lock").path
+        return path
     }
 
     static func acquireOrNotifyExisting(path: String = lockFilePath, notifyExisting: Bool = true) -> Bool {
@@ -27,12 +35,17 @@ enum SingleInstanceLock {
             return false
         }
         _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
-        if flock(fd, LOCK_EX | LOCK_NB) == 0 {
-            lockFD = fd
-            let pidStr = "\(getpid())\n"
-            _ = ftruncate(fd, 0)
-            _ = pidStr.withCString { write(fd, $0, strlen($0)) }
-            return true
+        for attempt in 0..<5 {
+            if flock(fd, LOCK_EX | LOCK_NB) == 0 {
+                lockFD = fd
+                let pidStr = "\(getpid())\n"
+                _ = ftruncate(fd, 0)
+                _ = pidStr.withCString { write(fd, $0, strlen($0)) }
+                return true
+            }
+            if attempt < 4 {
+                usleep(5_000) // Retry briefly in case `clipline --doctor` holds a microsecond O_SHLOCK probe
+            }
         }
         close(fd)
         if notifyExisting {
