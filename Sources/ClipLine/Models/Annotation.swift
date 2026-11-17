@@ -152,7 +152,7 @@ struct PinAnnotation: Identifiable {
 
         var supportsCornerResize: Bool {
             switch self {
-            case .text, .emoji, .counter, .spotlight:
+            case .rect, .arrow, .text, .emoji, .counter, .spotlight:
                 return true
             default:
                 return false

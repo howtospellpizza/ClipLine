@@ -60,11 +60,11 @@ Use the global capture shortcut (factory default `⌃X`, secondary `⌘⇧X`):
 
 ### 2. Pin Canvas & 9 Annotation Tools
 
-Every captured screenshot stays pinned at its exact screen coordinates. Use the floating toolbar below the pin to annotate, move, scale, or recolor any element (`⌘Z` undoes any step):
+Every captured screenshot stays pinned at its exact screen coordinates. Use the floating toolbar below the pin to annotate, move, scale, or recolor any element (`⌘Z` undoes and `⌘⇧Z` redoes any step):
 
 | Tool | Highlights |
 | :--- | :--- |
-| **Rectangle & Arrow** | Hold `Shift` to lock a `1:1` square or snap arrows to `45°` increments; 3 stroke sizes (`S` / `M` / `L`) and 6 colors. |
+| **Rectangle & Arrow** | Hold `Shift` to lock a `1:1` square or snap arrows to `45°` increments; 3 stroke sizes (`S` / `M` / `L`) and 6 colors. Click any drawn rectangle or arrow to resize its 4 corners or reposition its tail/tip endpoints. |
 | **Spotlight (`viewfinder.rectangular`)** | Drag across a focus area to dim everything outside it (`56%` dark mask with crisp white border). Multiple spotlights share one unified backdrop; click a spotlight and drag any of its **4 corner handles** to resize. |
 | **Pen & Highlighter** | Smooth freehand drawing and translucent `.multiply`-blend highlighter that never obscures underlying text. |
 | **Step Counter (`① ② ③…`)** | Auto-incrementing numbered badges; drag any of the 4 corner handles on a selected badge to scale it smoothly. |
@@ -122,7 +122,7 @@ Every captured screenshot stays pinned at its exact screen coordinates. Use the 
 
 Press `P` / `Tab` (or click **Clip**) to hang the current pin on the floating clothesline at the top of your screen (double-click any thumbnail to unclip it back to the canvas):
 
-- **Multi-photo drag & drop**: Drag a selected thumbnail to drag **all currently selected photos** together (or drag an unselected thumbnail to export just that one) directly into Slack, WeChat, a browser, or Finder. Drag the top rope to reposition the clothesline bar.
+- **Drag to reorder & multi-photo drag-out**: Drag any card left or right along the clothesline to reorder items (stitching and batch copy follow the new order), or drag a selected thumbnail outward to drop **all currently selected photos** together into Slack, WeChat, a browser, or Finder. Drag the top rope to reposition the clothesline bar.
 - **Batch Copy, Vertical Stitch (`Stitch`) & Horizontal Stitch (`Side`)**: Select 2+ thumbnails and click **Copy** (or **Save**) to export them separately, **Stitch** to combine them top-to-bottom, or **Side** to combine them left-to-right into a single Retina-sharp image.
 - **Framed backdrop (`Frame`)**: Toggle **Frame** on the bottom row of the clothesline controls to wrap the next copied or stitched image in a dark gradient card with rounded corners, inner item shadows, and even spacing.
 
@@ -277,7 +277,7 @@ The table lists factory defaults; use **Keyboard Shortcuts** (`⌘,`) or `clipli
 | `T` | Active pin | Run OCR and translate |
 | `⌫` / `Delete` | Active pin | Delete selected annotation |
 | `Space` | Active pin | Toggle toolbar |
-| `⌘Z` | Active pin | Undo last annotation |
+| `⌘Z` / `⌘⇧Z` | Active pin | Undo / Redo annotation |
 | `+` / `-` | Active pin | Zoom (`35%` – `300%`) |
 | `⌥` + Scroll | Active pin | Adjust opacity (`25%` – `100%`) |
 | `⎋` (`Esc`) | Capture / Pin | Cancel capture, cancel text edit, or close pin without modifying the clipboard |

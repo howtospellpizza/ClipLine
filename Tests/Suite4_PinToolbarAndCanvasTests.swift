@@ -1053,6 +1053,114 @@ func runSuite4PinToolbarAndCanvasTests(_ t: TestHarness, testPasteboard: NSPaste
         vm.annotations.removeAll(where: { $0.id == resizableText.id })
         vm.selectedTextAnnotationID = nil
         vm.activeTool = nil
+
+        // Verify .rect 4-corner resize, .arrow 2-endpoint resize, and Redo (vm.redo() + Cmd+Shift+Z)
+        let rRect = PinAnnotation(
+            tool: .rect,
+            color: .systemRed,
+            lineWidth: StrokePreset.medium.strokeLineWidth,
+            points: [CGPoint(x: 0.20, y: 0.20), CGPoint(x: 0.50, y: 0.50)]
+        )
+        vm.annotations.append(rRect)
+        vm.selectedTextAnnotationID = rRect.id
+        let rectHandles = canvas.selectedAnnotationCornerHandlesInView()
+        t.check(rectHandles.count == 4, "Selected .rect annotation exposes 4 corner resize handles")
+        if let brRectPt = rectHandles.first(where: { $0.0 == .bottomRight })?.1,
+           let rDown = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: brRectPt, modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 70, clickCount: 1, pressure: 1.0
+           ),
+           let rDrag = NSEvent.mouseEvent(
+            with: .leftMouseDragged, location: NSPoint(x: brRectPt.x + 28, y: brRectPt.y - 20), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 71, clickCount: 1, pressure: 1.0
+           ),
+           let rUp = NSEvent.mouseEvent(
+            with: .leftMouseUp, location: NSPoint(x: brRectPt.x + 28, y: brRectPt.y - 20), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 72, clickCount: 1, pressure: 1.0
+           ) {
+            canvas.mouseDown(with: rDown)
+            canvas.mouseDragged(with: rDrag)
+            canvas.mouseUp(with: rUp)
+            let resizedPts = vm.annotations.first(where: { $0.id == rRect.id })?.points ?? []
+            let maxX = resizedPts.map(\.x).max() ?? 0
+            let maxY = resizedPts.map(\.y).max() ?? 0
+            t.check(
+                maxX > 0.54 && maxY > 0.54,
+                "Dragging bottom-right handle of selected .rect expands its bounds while keeping opposite corner anchored",
+                detail: "pts=\(resizedPts)"
+            )
+            vm.undo()
+            let undonePts = vm.annotations.first(where: { $0.id == rRect.id })?.points ?? []
+            t.check(
+                undonePts == [CGPoint(x: 0.20, y: 0.20), CGPoint(x: 0.50, y: 0.50)] && vm.canRedo,
+                "Undoing .rect corner resize restores original bounds and enables Redo (canRedo == true)"
+            )
+            if let redoEv = NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [.command, .shift],
+                timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil,
+                characters: "Z", charactersIgnoringModifiers: "z", isARepeat: false, keyCode: 6
+            ) {
+                pinPanel.keyDown(with: redoEv)
+                let redonePts = vm.annotations.first(where: { $0.id == rRect.id })?.points ?? []
+                t.check(
+                    redonePts == resizedPts && !vm.canRedo,
+                    "Pressing Cmd+Shift+Z redoes the undone .rect resize"
+                )
+            }
+        }
+        vm.annotations.removeAll(where: { $0.id == rRect.id })
+
+        let rArrow = PinAnnotation(
+            tool: .arrow,
+            color: .systemBlue,
+            lineWidth: StrokePreset.medium.strokeLineWidth,
+            points: [CGPoint(x: 0.25, y: 0.30), CGPoint(x: 0.65, y: 0.60)]
+        )
+        vm.annotations.append(rArrow)
+        vm.selectedTextAnnotationID = rArrow.id
+        let arrowHandles = canvas.selectedAnnotationCornerHandlesInView()
+        t.check(arrowHandles.count == 2, "Selected .arrow annotation exposes 2 endpoint handles (tail & tip)")
+        if let tipHandlePt = arrowHandles.first(where: { $0.0 == .bottomRight })?.1,
+           let aDown = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: tipHandlePt, modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 73, clickCount: 1, pressure: 1.0
+           ),
+           let aDrag = NSEvent.mouseEvent(
+            with: .leftMouseDragged, location: NSPoint(x: tipHandlePt.x + 24, y: tipHandlePt.y - 18), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 74, clickCount: 1, pressure: 1.0
+           ),
+           let aUp = NSEvent.mouseEvent(
+            with: .leftMouseUp, location: NSPoint(x: tipHandlePt.x + 24, y: tipHandlePt.y - 18), modifierFlags: [],
+            timestamp: 0, windowNumber: pinPanel.windowNumber, context: nil, eventNumber: 75, clickCount: 1, pressure: 1.0
+           ) {
+            canvas.mouseDown(with: aDown)
+            canvas.mouseDragged(with: aDrag)
+            canvas.mouseUp(with: aUp)
+            let updatedArrowPts = vm.annotations.first(where: { $0.id == rArrow.id })?.points ?? []
+            t.check(
+                updatedArrowPts.count == 2 &&
+                abs(updatedArrowPts[0].x - 0.25) < 0.002 &&
+                abs(updatedArrowPts[0].y - 0.30) < 0.002 &&
+                updatedArrowPts[1].x > 0.68,
+                "Dragging .arrow tip handle repositions tip while keeping tail endpoint fixed",
+                detail: "pts=\(updatedArrowPts)"
+            )
+            vm.undo()
+            vm.redo()
+            let redoneArrowPts = vm.annotations.first(where: { $0.id == rArrow.id })?.points ?? []
+            t.check(
+                redoneArrowPts == updatedArrowPts,
+                "vm.redo() restores the adjusted .arrow endpoint after vm.undo()"
+            )
+            // Recording a new undo snapshot clears redoHistory
+            vm.undo()
+            t.check(vm.canRedo, "canRedo is true after undo")
+            vm.recordUndoSnapshot()
+            t.check(!vm.canRedo, "Recording a new undo snapshot clears redoHistory")
+        }
+        vm.annotations.removeAll(where: { $0.id == rArrow.id })
+        vm.selectedTextAnnotationID = nil
+        vm.activeTool = nil
     }
     let composite = vm.renderCompositeImage()
     t.check(composite?.size == vm.baseSize, "renderCompositeImage outputs exact baseSize")

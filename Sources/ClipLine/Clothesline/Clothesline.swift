@@ -22,6 +22,7 @@ final class ClotheslineManager: ObservableObject {
     @Published var items: [ClippedPinItem] = []
     @Published var toastMessage: String? = nil
     @Published var isFramedPaddingEnabled: Bool = false
+    @Published var draggingItemID: UUID? = nil
 
     private(set) var dockPanel: NSPanel?
 
@@ -218,6 +219,29 @@ final class ClotheslineManager: ObservableObject {
         }
         items.removeAll { $0.id == id }
         updateDockVisibility()
+    }
+
+    func moveItem(_ id: UUID, by offset: Int) {
+        guard offset != 0,
+              let fromIndex = items.firstIndex(where: { $0.id == id }) else { return }
+        let toIndex = max(0, min(items.count - 1, fromIndex + offset))
+        guard toIndex != fromIndex else { return }
+        let moved = items.remove(at: fromIndex)
+        items.insert(moved, at: toIndex)
+        if !selectedItems.isEmpty {
+            syncSelectedToClipboard(silent: true)
+        }
+    }
+
+    func reorderItem(draggedID: UUID, targetID: UUID) {
+        guard draggedID != targetID,
+              let fromIndex = items.firstIndex(where: { $0.id == draggedID }),
+              let toIndex = items.firstIndex(where: { $0.id == targetID }) else { return }
+        let moved = items.remove(at: fromIndex)
+        items.insert(moved, at: toIndex)
+        if !selectedItems.isEmpty {
+            syncSelectedToClipboard(silent: true)
+        }
     }
 
     func clearAll() {
@@ -646,6 +670,8 @@ struct ClotheslinePhotoInteractionOverlay: NSViewRepresentable {
 }
 
 final class ClotheslinePhotoDragNSView: NSView, NSDraggingSource {
+    static var activeDraggedItemID: UUID?
+
     var item: ClippedPinItem?
     var onSingleTap: (() -> Void)?
     var onDoubleTap: (() -> Void)?
@@ -654,6 +680,16 @@ final class ClotheslinePhotoDragNSView: NSView, NSDraggingSource {
     private var mouseDownPoint: NSPoint = .zero
     private var didStartDrag: Bool = false
     private var pendingSingleTapWorkItem: DispatchWorkItem?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerForDraggedTypes([.fileURL])
+    }
 
     override var mouseDownCanMoveWindow: Bool { false }
 
@@ -665,7 +701,41 @@ final class ClotheslinePhotoDragNSView: NSView, NSDraggingSource {
     }
 
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        .copy
+        context == .withinApplication ? [.move, .copy] : .copy
+    }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        Self.activeDraggedItemID = nil
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard let draggedID = Self.activeDraggedItemID,
+              let targetID = item?.id else {
+            return []
+        }
+        if draggedID != targetID {
+            withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
+                ClotheslineManager.shared.reorderItem(draggedID: draggedID, targetID: targetID)
+            }
+        }
+        return .move
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        Self.activeDraggedItemID != nil ? .move : []
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let draggedID = Self.activeDraggedItemID,
+              let targetID = item?.id else {
+            return false
+        }
+        if draggedID != targetID {
+            withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
+                ClotheslineManager.shared.reorderItem(draggedID: draggedID, targetID: targetID)
+            }
+        }
+        return true
     }
 
     func cancelPendingSingleTap() {
@@ -687,9 +757,13 @@ final class ClotheslinePhotoDragNSView: NSView, NSDraggingSource {
         guard hypot(pt.x - mouseDownPoint.x, pt.y - mouseDownPoint.y) >= 3.0 else { return }
         didStartDrag = true
         cancelPendingSingleTap()
+        Self.activeDraggedItemID = item.id
 
         let exported = ClotheslineManager.shared.writeDragExportFiles(startingFrom: item)
-        guard !exported.isEmpty else { return }
+        guard !exported.isEmpty else {
+            Self.activeDraggedItemID = nil
+            return
+        }
 
         let baseFrame = bounds.isEmpty ? NSRect(x: 0, y: 0, width: 90, height: 64) : bounds
         let draggingItems: [NSDraggingItem] = exported.enumerated().map { idx, entry in

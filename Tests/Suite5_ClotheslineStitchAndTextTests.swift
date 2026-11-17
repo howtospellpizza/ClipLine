@@ -422,4 +422,44 @@ func runSuite5ClotheslineStitchAndTextTests(_ t: TestHarness, testPasteboard: NS
         "cleanupStaleTempFiles preserves non-ClipLine files in target directory"
     )
 
+    // Verify ClotheslineManager.moveItem(_:by:) reorders items, clamps out-of-range moves, and updates stitched order
+    let clManager = ClotheslineManager.shared
+    clManager.clearAll()
+    let prevPBProvider = clManager.pasteboardProvider
+    let prevTempOverride = clManager.tempDirOverride
+    clManager.pasteboardProvider = { testPasteboard }
+    clManager.tempDirOverride = testTempDirURL.path
+
+    let itemA = ClippedPinItem(id: UUID(), sessionVM: PinSessionViewModel(image: img1), compositeImage: img1, tiltAngle: 0)
+    let itemB = ClippedPinItem(id: UUID(), sessionVM: PinSessionViewModel(image: img2), compositeImage: img2, tiltAngle: 0)
+    clManager.items = [itemA, itemB]
+    clManager.moveItem(itemA.id, by: -1)
+    t.check(
+        clManager.items.map(\.id) == [itemA.id, itemB.id],
+        "moveItem with negative offset at index 0 is a safe no-op"
+    )
+    clManager.moveItem(itemB.id, by: -1)
+    t.check(
+        clManager.items.map(\.id) == [itemB.id, itemA.id],
+        "moveItem(itemB.id, by: -1) moves second photo before first photo on the clothesline"
+    )
+    clManager.moveItem(itemB.id, by: 1)
+    t.check(
+        clManager.items.map(\.id) == [itemA.id, itemB.id],
+        "moveItem(itemB.id, by: 1) moves first photo back to index 1"
+    )
+    clManager.reorderItem(draggedID: itemB.id, targetID: itemA.id)
+    t.check(
+        clManager.items.map(\.id) == [itemB.id, itemA.id],
+        "reorderItem(draggedID:targetID:) reorders dragged card to target card slot during clothesline drag"
+    )
+    clManager.reorderItem(draggedID: itemB.id, targetID: itemB.id)
+    t.check(
+        clManager.items.map(\.id) == [itemB.id, itemA.id],
+        "reorderItem with identical draggedID and targetID is a no-op"
+    )
+    clManager.clearAll()
+    clManager.pasteboardProvider = prevPBProvider
+    clManager.tempDirOverride = prevTempOverride
+
 }
