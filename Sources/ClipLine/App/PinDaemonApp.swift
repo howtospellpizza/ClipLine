@@ -353,92 +353,31 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
             captureScaleFactor: res.scaleFactor,
             cropScreenRect: res.selectedScreenRect
         )
-        vm.onStartScrollingCapture = { [weak self, weak vm] in
-            guard let self = self, let vm = vm else { return }
-            let previousPanel = vm.hostingPanel
-            let previousToolbar = vm.toolbarPanel
-
-            if let previousPanel, let previousToolbar, previousPanel.childWindows?.contains(previousToolbar) == true {
-                previousPanel.removeChildWindow(previousToolbar)
-            }
-            previousToolbar?.sharingType = .none
-            previousToolbar?.alphaValue = 0
-            previousToolbar?.orderOut(nil)
-            previousPanel?.sharingType = .none
-            previousPanel?.alphaValue = 0
-            previousPanel?.orderOut(nil)
-
-            let restorePreviousPin: () -> Void = { [weak vm, weak previousPanel, weak previousToolbar] in
-                guard let vm, let previousPanel, !vm.isClosed else { return }
-                previousPanel.sharingType = .readOnly
-                previousPanel.alphaValue = 1
-                previousPanel.orderFrontRegardless()
-                if let previousToolbar, vm.showToolbar {
-                    previousToolbar.sharingType = .readOnly
-                    previousToolbar.alphaValue = 1
-                    if previousPanel.childWindows?.contains(previousToolbar) != true {
-                        previousPanel.addChildWindow(previousToolbar, ordered: .above)
-                    }
-                    previousToolbar.order(.above, relativeTo: previousPanel.windowNumber)
-                    previousToolbar.orderFrontRegardless()
-                }
-                NSApp.activate(ignoringOtherApps: true)
-                previousPanel.makeKeyAndOrderFront(nil)
-            }
-
-            if vm.canAdjustCrop,
-               let fullCG = vm.fullScreenCGImage,
-               let fullFrame = vm.fullScreenFrame,
-               let cropRect = vm.cropScreenRect {
-                let seed = CaptureSelectionResult(
-                    fullScreenCGImage: fullCG,
-                    fullScreenFrame: fullFrame,
-                    scaleFactor: vm.captureScaleFactor,
-                    selectedScreenRect: cropRect,
-                    croppedImage: vm.baseImage,
-                    isScrollingCapture: true
-                )
-                if self.isCapturing {
-                    self.captureController.cancelActiveCapture(reason: "retriggered from pin toolbar")
-                }
-                self.isCapturing = true
-                self.captureController.beginDirectScrollingCapture(initialSelection: seed) { [weak self] finalRes in
-                    guard let self = self else { return }
-                    self.isCapturing = false
-                    if let finalRes = finalRes {
-                        previousPanel?.onClosePanel?()
-                        self.createPinWindow(fromCapture: finalRes)
-                    } else {
-                        restorePreviousPin()
-                    }
-                }
-            } else {
-                if self.isCapturing {
-                    self.captureController.cancelActiveCapture(reason: "retriggered from pin toolbar")
-                }
-                self.isCapturing = true
-                self.captureController.beginCapture(preferScrollingCapture: true) { [weak self] finalRes in
-                    guard let self = self else { return }
-                    self.isCapturing = false
-                    if let finalRes = finalRes {
-                        previousPanel?.onClosePanel?()
-                        self.createPinWindow(fromCapture: finalRes)
-                    } else {
-                        restorePreviousPin()
-                    }
-                }
-            }
-        }
+        vm.onStartScrollingCapture = makeToolbarScrollingCaptureAction(for: vm)
         let panelFrame = PinSessionViewModel.panelFrameForImageScreenRect(res.selectedScreenRect)
         presentPinPanel(vm: vm, frame: panelFrame)
     }
 
     func createPinWindow(with image: NSImage) {
         let vm = PinSessionViewModel(image: image)
-        vm.onStartScrollingCapture = { [weak self, weak vm] in
+        vm.onStartScrollingCapture = makeToolbarScrollingCaptureAction(for: vm)
+        let mouse = NSEvent.mouseLocation
+        let rect = NSRect(
+            x: round(mouse.x - image.size.width / 2),
+            y: round(mouse.y - image.size.height / 2),
+            width: round(image.size.width),
+            height: round(image.size.height)
+        )
+        let panelFrame = PinSessionViewModel.panelFrameForImageScreenRect(rect)
+        presentPinPanel(vm: vm, frame: panelFrame)
+    }
+
+    private func makeToolbarScrollingCaptureAction(for vm: PinSessionViewModel) -> () -> Void {
+        return { [weak self, weak vm] in
             guard let self = self, let vm = vm else { return }
             let previousPanel = vm.hostingPanel
             let previousToolbar = vm.toolbarPanel
+
             if let previousPanel, let previousToolbar, previousPanel.childWindows?.contains(previousToolbar) == true {
                 previousPanel.removeChildWindow(previousToolbar)
             }
@@ -448,17 +387,14 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
             previousPanel?.sharingType = .none
             previousPanel?.alphaValue = 0
             previousPanel?.orderOut(nil)
-            if self.isCapturing {
-                self.captureController.cancelActiveCapture(reason: "retriggered from pin toolbar")
-            }
-            self.isCapturing = true
-            self.captureController.beginCapture(preferScrollingCapture: true) { [weak self] finalRes in
+
+            let handleCompletion: (CaptureSelectionResult?) -> Void = { [weak self, weak vm, weak previousPanel, weak previousToolbar] finalRes in
                 guard let self = self else { return }
                 self.isCapturing = false
                 if let finalRes = finalRes {
                     previousPanel?.onClosePanel?()
                     self.createPinWindow(fromCapture: finalRes)
-                } else if let previousPanel, !vm.isClosed {
+                } else if let vm, let previousPanel, !vm.isClosed {
                     previousPanel.sharingType = .readOnly
                     previousPanel.alphaValue = 1
                     previousPanel.orderFrontRegardless()
@@ -475,16 +411,29 @@ final class PinDaemonApp: NSObject, NSApplicationDelegate {
                     previousPanel.makeKeyAndOrderFront(nil)
                 }
             }
+
+            if self.isCapturing {
+                self.captureController.cancelActiveCapture(reason: "retriggered from pin toolbar")
+            }
+            self.isCapturing = true
+
+            if vm.canAdjustCrop,
+               let fullCG = vm.fullScreenCGImage,
+               let fullFrame = vm.fullScreenFrame,
+               let cropRect = vm.cropScreenRect {
+                let seed = CaptureSelectionResult(
+                    fullScreenCGImage: fullCG,
+                    fullScreenFrame: fullFrame,
+                    scaleFactor: vm.captureScaleFactor,
+                    selectedScreenRect: cropRect,
+                    croppedImage: vm.baseImage,
+                    isScrollingCapture: true
+                )
+                self.captureController.beginDirectScrollingCapture(initialSelection: seed, completion: handleCompletion)
+            } else {
+                self.captureController.beginCapture(preferScrollingCapture: true, completion: handleCompletion)
+            }
         }
-        let mouse = NSEvent.mouseLocation
-        let rect = NSRect(
-            x: round(mouse.x - image.size.width / 2),
-            y: round(mouse.y - image.size.height / 2),
-            width: round(image.size.width),
-            height: round(image.size.height)
-        )
-        let panelFrame = PinSessionViewModel.panelFrameForImageScreenRect(rect)
-        presentPinPanel(vm: vm, frame: panelFrame)
     }
 
     func presentPinPanel(vm: PinSessionViewModel, frame: NSRect) {

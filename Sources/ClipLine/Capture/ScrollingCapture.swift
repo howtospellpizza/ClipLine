@@ -878,9 +878,8 @@ struct ScrollingImageStitcher {
             if probeLB == 0 {
                 // Balanced/constant row sums (`rowLowerBound == 0`): skip scanning `rowLowerBound` and accumulate
                 // exact `rowL1Diff` directly in strided order, aborting as soon as `exactTotalDiff > maxAllowedTotal`.
-                // On large viewports (`length >= 300`), also enforce a 6-row strided concentration gate:
-                // if all 4 initial anchor rows already exceed `earlyAbortThreshold / 2`, check after 6 strided rows
-                // whether `exactTotalDiff` exceeds `6 * samplesPerRow * (earlyAbortThreshold * 0.65)`.
+                // On very large viewports (`length >= 1024`), if all 8 initial strided rows individually exceed
+                // `earlyAbortThreshold * 1.5`, abort early to avoid full-window scans on non-matching balanced noise.
                 let d0 = rowL1Diff(accumulatedRows[accStart + a0], nextRows[nextStart + a0])
                 if d0 > maxAllowedTotal { return .greatestFiniteMagnitude }
                 let d1 = rowL1Diff(accumulatedRows[accStart + a1], nextRows[nextStart + a1])
@@ -893,25 +892,25 @@ struct ScrollingImageStitcher {
                 exactTotalDiff += d3
                 if exactTotalDiff > maxAllowedTotal { return .greatestFiniteMagnitude }
 
-                let anchorFloor = Int((earlyAbortThreshold * Double(samplesPerRow) * 0.5).rounded(.up))
-                let allAnchorsNoisy = length >= 300 && d0 > anchorFloor && d1 > anchorFloor && d2 > anchorFloor && d3 > anchorFloor
-                if allAnchorsNoisy {
-                    let fourRowCap = Int((earlyAbortThreshold * Double(samplesPerRow * 4) * 0.65).rounded(.up))
-                    if exactTotalDiff > fourRowCap {
-                        return .greatestFiniteMagnitude
-                    }
-                }
-
+                let highRowThreshold = Int((earlyAbortThreshold * Double(samplesPerRow) * 1.5).rounded(.up))
+                var allSampledRowsExceedHighThreshold = length >= 1024
+                    && d0 > highRowThreshold
+                    && d1 > highRowThreshold
+                    && d2 > highRowThreshold
+                    && d3 > highRowThreshold
                 var sampledRows = 4
-                let eightRowCap = Int((earlyAbortThreshold * Double(samplesPerRow * 8) * 0.85).rounded(.up))
                 let stride = max(2, min(16, length / 16))
                 for rem in 0..<stride {
                     var sdy = rem
                     while sdy < length {
                         if sdy != a0 && sdy != a1 && sdy != a2 && sdy != a3 {
-                            exactTotalDiff += rowL1Diff(accumulatedRows[accStart + sdy], nextRows[nextStart + sdy])
+                            let rDiff = rowL1Diff(accumulatedRows[accStart + sdy], nextRows[nextStart + sdy])
+                            exactTotalDiff += rDiff
                             sampledRows += 1
-                            if exactTotalDiff > maxAllowedTotal || (allAnchorsNoisy && sampledRows == 8 && exactTotalDiff > eightRowCap) {
+                            if sampledRows <= 8 && rDiff <= highRowThreshold {
+                                allSampledRowsExceedHighThreshold = false
+                            }
+                            if exactTotalDiff > maxAllowedTotal || (sampledRows == 8 && allSampledRowsExceedHighThreshold) {
                                 return .greatestFiniteMagnitude
                             }
                         }
@@ -1142,8 +1141,7 @@ final class ScrollingCaptureSessionController: ObservableObject {
         installEventMonitors()
     }
 
-    static func directionHint(scrollingDeltaY: CGFloat, isDirectionInvertedFromDevice: Bool = true) -> ScrollingDirectionHint {
-        _ = isDirectionInvertedFromDevice
+    static func directionHint(scrollingDeltaY: CGFloat) -> ScrollingDirectionHint {
         guard abs(scrollingDeltaY) > 0.01 else { return .unknown }
         // AppKit pre-applies the user's Natural/Traditional scrolling preference to `scrollingDeltaY`:
         // `scrollingDeltaY < 0` scrolls downward (revealing content below) and `scrollingDeltaY > 0` scrolls upward (revealing content above).
@@ -1152,7 +1150,6 @@ final class ScrollingCaptureSessionController: ObservableObject {
 
     func recordScrollEvent(
         scrollingDeltaY: CGFloat,
-        isDirectionInvertedFromDevice: Bool = true,
         screenLocation: NSPoint? = nil,
         timestamp: CFAbsoluteTime = CFAbsoluteTimeGetCurrent()
     ) {
@@ -1160,7 +1157,6 @@ final class ScrollingCaptureSessionController: ObservableObject {
             return
         }
         guard abs(scrollingDeltaY) > 0.01 else { return }
-        _ = isDirectionInvertedFromDevice
         if timestamp - lastScrollEventAt > 0.45 {
             accumulatedScrollDeltaSinceLastSample = 0
             scrollDeltaGeneration &+= 1
@@ -1436,7 +1432,6 @@ final class ScrollingCaptureSessionController: ObservableObject {
         let now = CFAbsoluteTimeGetCurrent()
         recordScrollEvent(
             scrollingDeltaY: event.scrollingDeltaY,
-            isDirectionInvertedFromDevice: event.isDirectionInvertedFromDevice,
             screenLocation: loc,
             timestamp: now
         )

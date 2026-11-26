@@ -1360,10 +1360,38 @@ func runSuite1CaptureAndCropTests(_ t: TestHarness, testPasteboard: NSPasteboard
                     balReplayMatched = (balStitcher.appendFrame(balVpImg) == .unchanged)
                 }
 
+                // Also verify a 360-row viewport (300-row overlap at shift 32) where all 4 balanced-RGB anchor rows
+                // have localized +/-8 noise (`d0..d3 == 768`, full MAD == 0.107 <= 11.5) still stitches cleanly!
+                let balScroll0 = Array(balDocRows[0..<360])
+                var balScroll32 = Array(balDocRows[32..<392])
+                let overlapLen300 = 300
+                for a in [0, overlapLen300 / 3, (overlapLen300 * 2) / 3, overlapLen300 - 1] {
+                    let rowIdx = 28 + a
+                    for p in 0..<16 {
+                        for c in 0..<3 {
+                            let c0 = (p * 2) * 3 + c
+                            let c1 = (p * 2 + 1) * 3 + c
+                            if balScroll32[rowIdx][c0] < 128 {
+                                balScroll32[rowIdx][c0] &+= 8
+                                balScroll32[rowIdx][c1] &-= 8
+                            } else {
+                                balScroll32[rowIdx][c0] &-= 8
+                                balScroll32[rowIdx][c1] &+= 8
+                            }
+                        }
+                    }
+                }
+                var balAnchorMatched = false
+                if let b0Img = makeBalancedReplayImage(balScroll0),
+                   let b32Img = makeBalancedReplayImage(balScroll32) {
+                    var bStitcher = ScrollingImageStitcher(initialFrame: b0Img, scaleFactor: 2.0)
+                    balAnchorMatched = (bStitcher.appendFrame(b32Img) == .appended(addedPixels: 32, totalPixelHeight: 392))
+                }
+
                 t.check(
-                    decoyRes == .unchanged && balReplayMatched,
-                    "ScrollingImageStitcher replay deduplication finds genuine match past 40 non-overlapping sparse-probe decoys and when 3 balanced-RGB probe rows have localized transient artifacts (MAD 5.71 <= 6.0)",
-                    detail: "decoyRes=\(decoyRes), balReplayMatched=\(balReplayMatched)"
+                    decoyRes == .unchanged && balReplayMatched && balAnchorMatched,
+                    "ScrollingImageStitcher replay deduplication finds genuine match past 40 non-overlapping sparse-probe decoys, when 3 balanced-RGB probe rows have localized transient artifacts (MAD 5.71 <= 6.0), and when all 4 anchor rows of a 300-row overlap have +/-8 balanced noise",
+                    detail: "decoyRes=\(decoyRes), balReplayMatched=\(balReplayMatched), balAnchorMatched=\(balAnchorMatched)"
                 )
             } else {
                 t.check(false, "Created 40 non-overlapping decoy replay frames")

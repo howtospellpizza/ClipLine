@@ -43,6 +43,11 @@ find_valid_identity() {
             printf '%s\n' "$anchored"
             return 0
         fi
+        # Do not silently fall through to a different certificate if an anchored fingerprint is configured
+        # unless `--create` was explicitly requested to re-establish signing.
+        if [ "$ALLOW_CREATE" != "1" ]; then
+            return 1
+        fi
     fi
     preferred=$(printf '%s\n' "$identities" | grep "\"$CERT_NAME\"" | awk 'NF >= 2 { print $2; exit }' || true)
     if [ -n "$preferred" ]; then
@@ -59,13 +64,20 @@ find_valid_identity() {
 
 EXISTING_ID=$(find_valid_identity || true)
 if [ -n "$EXISTING_ID" ]; then
-    defaults write io.github.clipline CodesignIdentitySHA1 -string "$EXISTING_ID" 2>/dev/null || true
+    if [ -z "$ANCHORED_FINGERPRINT" ] || [ "$ALLOW_CREATE" = "1" ]; then
+        defaults write io.github.clipline CodesignIdentitySHA1 -string "$EXISTING_ID" 2>/dev/null || true
+    fi
     if [ "$PRINT_ONLY" = "1" ]; then
         printf '%s\n' "$EXISTING_ID"
     else
         printf '✅ Using existing code signing identity: %s\n' "$EXISTING_ID"
     fi
     exit 0
+fi
+
+if [ -n "$ANCHORED_FINGERPRINT" ] && [ "$ALLOW_CREATE" != "1" ]; then
+    printf '❌ Anchored code signing identity %s was not found in %s (run `make setup-codesign` or `defaults delete io.github.clipline CodesignIdentitySHA1` to reset).\n' "$ANCHORED_FINGERPRINT" "$LOGIN_KEYCHAIN" >&2
+    exit 1
 fi
 
 if [ "$ALLOW_CREATE" != "1" ]; then

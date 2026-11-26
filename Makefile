@@ -29,7 +29,8 @@ sync-version:
 build: sync-version
 	@mkdir -p build
 	swiftc -target $(TARGET) -O $(SRC) -o build/$(BINARY_NAME)
-	@id="$$CODESIGN_IDENTITY"; \
+	@set -e; \
+	id="$$CODESIGN_IDENTITY"; \
 	if [ -z "$$id" ]; then \
 		id=$$(sh scripts/ensure-codesign-cert.sh --print-identity); \
 	fi; \
