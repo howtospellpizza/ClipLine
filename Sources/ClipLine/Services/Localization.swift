@@ -194,6 +194,13 @@ enum L10n {
         }
     }
 
+    static var toolbarScrollingCaptureTooltip: String {
+        switch AppLanguage.current {
+        case .en: return "Start scrolling long capture in this region (L)"
+        case .zhHans: return "在此区域向下滚动截长图 (L)"
+        }
+    }
+
     static var toastQRInProgress: String {
         switch AppLanguage.current {
         case .en: return "Scanning QR code / barcode..."
@@ -692,6 +699,13 @@ enum L10n {
         }
     }
 
+    static var shortcutMenuScrollingCapture: String {
+        switch AppLanguage.current {
+        case .en: return "Scrolling Long Capture (L)"
+        case .zhHans: return "滚动截长图 (L)"
+        }
+    }
+
     static var shortcutMenuClipboard: String {
         switch AppLanguage.current {
         case .en: return "Pin Clipboard Image"
@@ -947,6 +961,69 @@ enum L10n {
         switch AppLanguage.current {
         case .en: return "Show Magnifier & HEX Color Picker (Press C to copy HEX)"
         case .zhHans: return "显示放大镜与 HEX 取色器（截图时按 C 复制色值）"
+        }
+    }
+
+    // MARK: - Scrolling Long Capture
+
+    static func captureSelectionScrollHint(defaultScrollMode: Bool, lang: AppLanguage = .current) -> String {
+        switch lang {
+        case .en:
+            return defaultScrollMode ? "Release to start scrolling capture · Esc cancel" : "L · Scroll Capture"
+        case .zhHans:
+            return defaultScrollMode ? "松手开始滚动截长图 · Esc 取消" : "按 L 滚动截长图"
+        }
+    }
+
+    static func scrollingCaptureHudStatus(
+        heightPoints: Int,
+        slicesCount: Int,
+        warning: String? = nil,
+        lang: AppLanguage = .current
+    ) -> String {
+        if let warning, !warning.isEmpty {
+            return warning
+        }
+        switch lang {
+        case .en:
+            return "Scroll down inside box · \(heightPoints)pt (\(slicesCount) \(slicesCount == 1 ? "frame" : "frames"))"
+        case .zhHans:
+            return "在框内向下滚动页面 · 已拼 \(heightPoints)pt（\(slicesCount) 帧）"
+        }
+    }
+
+    static var scrollingCaptureOverlapLostWarning: String {
+        switch AppLanguage.current {
+        case .en: return "Scrolled too fast — scroll back up slightly to reconnect"
+        case .zhHans: return "滚动过快导致画面断档，请稍微向上回滚一点恢复拼接"
+        }
+    }
+
+    static var scrollingCaptureCaptureFailedWarning: String {
+        switch AppLanguage.current {
+        case .en: return "Unable to capture screen updates — check Screen Recording permission"
+        case .zhHans: return "无法捕获实时画面，请检查录屏权限"
+        }
+    }
+
+    static var scrollingCapturePermissionHint: String {
+        switch AppLanguage.current {
+        case .en: return "Use Done/Cancel buttons if Esc/↩ is blocked in other apps"
+        case .zhHans: return "切到其他应用时若 Esc/↩ 无响应，可直接点击下方按钮"
+        }
+    }
+
+    static var scrollingCaptureDoneButton: String {
+        switch AppLanguage.current {
+        case .en: return "Done (↩)"
+        case .zhHans: return "完成 (↩)"
+        }
+    }
+
+    static var scrollingCaptureCancelButton: String {
+        switch AppLanguage.current {
+        case .en: return "Cancel (Esc)"
+        case .zhHans: return "取消 (Esc)"
         }
     }
 }

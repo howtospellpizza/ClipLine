@@ -1,5 +1,7 @@
 BINARY_NAME = clipline
 INSTALL_DIR = $(HOME)/.local/bin
+CODESIGN_IDENTIFIER = io.github.clipline
+LOGIN_KEYCHAIN ?= $(shell security default-keychain -d user 2>/dev/null | sed -n 's/.*"\(.*\)".*/\1/p')
 PLIST_LABEL = io.github.clipline.daemon
 PLIST_PATH = $(HOME)/Library/LaunchAgents/$(PLIST_LABEL).plist
 VERSION := $(shell tr -d '[:space:]' < VERSION)
@@ -9,9 +11,12 @@ TEST_SRC = $(shell find Tests -name '*.swift' | sort)
 MACOS_MIN_VERSION = 14.0
 TARGET = $(shell uname -m)-apple-macosx$(MACOS_MIN_VERSION)
 
-.PHONY: all sync-version build test test-install install install-service uninstall clean
+.PHONY: all sync-version setup-codesign build test test-install install install-service uninstall clean
 
 all: build
+
+setup-codesign:
+	@sh scripts/ensure-codesign-cert.sh --create
 
 sync-version:
 	@printf '// Auto-generated from VERSION by Makefile — committed so `swift build` also works out of the box.\nlet ClipLineGeneratedBuildVersion = "%s"\n' "$(VERSION)" > "$(GENERATED_VERSION_FILE).tmp"
@@ -24,7 +29,17 @@ sync-version:
 build: sync-version
 	@mkdir -p build
 	swiftc -target $(TARGET) -O $(SRC) -o build/$(BINARY_NAME)
-	@echo "✅ Built build/$(BINARY_NAME) (v$(VERSION))"
+	@id="$$CODESIGN_IDENTITY"; \
+	if [ -z "$$id" ]; then \
+		id=$$(sh scripts/ensure-codesign-cert.sh --print-identity); \
+	fi; \
+	if [ -n "$$id" ] && [ "$$id" != "-" ]; then \
+		codesign --force --sign "$$id" $(if $(LOGIN_KEYCHAIN),--keychain "$(LOGIN_KEYCHAIN)") --identifier "$(CODESIGN_IDENTIFIER)" --timestamp=none build/$(BINARY_NAME); \
+		printf '✅ Built and signed build/%s (v%s, identity: %s)\n' "$(BINARY_NAME)" "$(VERSION)" "$$id"; \
+	else \
+		codesign --force --sign - --identifier "$(CODESIGN_IDENTIFIER)" --timestamp=none build/$(BINARY_NAME); \
+		printf '✅ Built build/%s (v%s, ad-hoc signed)\n' "$(BINARY_NAME)" "$(VERSION)"; \
+	fi
 
 test: sync-version
 	@mkdir -p build
@@ -76,8 +91,9 @@ install-service: install
 	fi
 	@echo "✅ Installed and started LaunchAgent $(PLIST_PATH)"
 
-test-install: build
-	sh Tests/install-smoke.sh
+test-install:
+	LOGIN_KEYCHAIN= CODESIGN_IDENTITY=- $(MAKE) build
+	LOGIN_KEYCHAIN= CODESIGN_IDENTITY=- sh Tests/install-smoke.sh
 
 uninstall:
 	@if [ -f "$(PLIST_PATH)" ] && [ "$${CLIPLINE_SKIP_LAUNCHCTL:-0}" != "1" ]; then \

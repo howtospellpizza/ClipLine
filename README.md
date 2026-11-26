@@ -45,6 +45,7 @@ Use the global capture shortcut (factory default `⌃X`, secondary `⌘⇧X`):
 
 - **Single-click window snap**: Hover over any visible window (including Stage Manager thumbnails) to preview its bounds, then **single-click** to capture that exact window in one step.
 - **Freehand drag & full-screen capture**: Click and drag anywhere to select a custom region, or press `Space` / `⌘A` inside the capture overlay to capture the entire screen immediately.
+- **Scrolling long capture (`L` / `--scroll`)**: Press `L` during capture (or click the **Long Capture** icon on any pin toolbar, choose **Scrolling Long Capture (`L`)** from the menu bar, or run `clipline --scroll`), then scroll vertically (or up and down) to stitch long pages in real time with automatic overlap deduplication, sticky-header preservation, and `ScreenCaptureKit` own-window exclusion. Press `Return` (`↩`) to finish into a pin window.
 - **Magnifier & HEX color picker**: Hover to inspect pixel coordinates and the `8×` magnifier loupe; press `C` during capture to copy the hovered pixel's `#RRGGBB` HEX color and exit capture, or customize crosshair style (`Full-Screen Lines`, `Corner Bracket`, `Precision Dot`) and color in **Keyboard Shortcuts** (`⌘,`).
 - **Non-destructive crop adjustment**: Before moving the pin or selecting a drawing tool (at `100%` zoom), drag any of the 8 handles or 4 edges to expand or shrink the crop against the original full-screen frame.
 
@@ -173,8 +174,11 @@ Press `⌃⌘V` (or run `~/.local/bin/clipline --clipboard`):
 ```bash
 git clone https://github.com/howtospellpizza/ClipLine.git
 cd ClipLine
+make setup-codesign    # optional: creates a local code-signing cert so Screen Recording permission persists across updates
 make install-service   # installs ~/.local/bin/clipline + starts LaunchAgent for auto-start on login
 ```
+
+> **Tip**: `make build` automatically signs `build/clipline` with any valid code-signing certificate in your login keychain (or creates `ClipLine Local Signer` when running `make setup-codesign`), preserving your macOS Screen Recording authorization across rebuilds and `clipline --update`.
 
 Or if you only want to install the binary without registering a LaunchAgent:
 
@@ -212,7 +216,7 @@ The updater downloads a fresh temporary checkout, builds before replacing the cu
 - If an already registered LaunchAgent targets this exact executable, the updater restarts that job and never creates one. Otherwise, it restarts only a running daemon at the same executable path, using the updater's current environment. Environment overrides unique to the old process cannot be recovered.
 - Active pins are unsaved and may be lost when the daemon restarts. Save anything important before updating. If no matching daemon or LaunchAgent is running, the updater leaves the app stopped.
 
-`make install` is a local build-and-copy operation only: it builds `build/clipline` and copies it to `~/.local/bin/clipline`. It does not sign the binary, stop or restart a daemon, or register/manage a LaunchAgent. To update from a local checkout instead:
+`make install` is a local build-and-copy operation only: it builds `build/clipline` (signing it with a local keychain certificate when available, or ad-hoc otherwise) and copies it to `~/.local/bin/clipline`. It does not stop or restart a daemon, or register/manage a LaunchAgent. To update from a local checkout instead:
 
 ```bash
 cd /path/to/ClipLine
@@ -246,6 +250,7 @@ Use the full path `~/.local/bin/clipline` unless `~/.local/bin` is in your `PATH
 
 ```bash
 ~/.local/bin/clipline --capture     # start interactive region capture
+~/.local/bin/clipline --scroll      # start interactive scrolling long capture (-l)
 ~/.local/bin/clipline --clipboard   # pin current clipboard image (or plain text as a sticky note)
 ~/.local/bin/clipline --settings    # open shortcut settings (starts the daemon if needed)
 ~/.local/bin/clipline --shortcuts   # print current global shortcuts as JSON
@@ -267,6 +272,7 @@ The table lists factory defaults; use **Keyboard Shortcuts** (`⌘,`) or `clipli
 | `⌘⇧X` | Global | Capture region (secondary shortcut) |
 | `⌃⌘V` | Global | Pin image (or plain text as a sticky note) from clipboard |
 | `Space` / `⌘A` | Capture overlay | Capture full screen immediately |
+| `L` | Capture overlay | Start scrolling long capture for the selected region or hovered window |
 | `C` | Capture overlay | Copy hovered pixel `#RRGGBB` HEX color and exit capture |
 | `↩` (`Return`) | Active pin | Copy composited image and close pin |
 | `⌘C` | Active pin | Copy composited image (keep pin open) |

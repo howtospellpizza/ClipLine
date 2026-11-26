@@ -10,6 +10,7 @@ struct CaptureSelectionResult {
     let scaleFactor: CGFloat
     let selectedScreenRect: NSRect
     let croppedImage: NSImage
+    var isScrollingCapture: Bool = false
 }
 
 // MARK: - Annotation Model & Stroke Size Preset

@@ -10,6 +10,7 @@ import SwiftUI
 final class TestHarness {
     var passed = 0
     var failed = 0
+    private var asyncTests: [@MainActor () async -> Void] = []
 
     func check(_ condition: @autoclosure () -> Bool, _ name: String, detail: String = "") {
         if condition() {
@@ -26,6 +27,15 @@ final class TestHarness {
         print("📊 Test Summary: \(passed) passed, \(failed) failed")
         print("========================================")
         return failed == 0 ? 0 : 1
+    }
+
+    func runAsync(_ test: @escaping @MainActor () async -> Void) {
+        asyncTests.append(test)
+    }
+
+    func waitForAsyncTests() async {
+        for test in asyncTests { await test() }
+        asyncTests.removeAll()
     }
 }
 
@@ -187,7 +197,7 @@ func parseTestSuiteFilter(arguments: [String] = CommandLine.arguments) -> String
 }
 
 @MainActor
-func runAllTests(filter explicitFilter: String? = nil) -> Int32 {
+func runAllTests(filter explicitFilter: String? = nil) -> (@MainActor () async -> Int32) {
     let t = TestHarness()
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.accessory)
@@ -200,11 +210,15 @@ func runAllTests(filter explicitFilter: String? = nil) -> Int32 {
     ClotheslineManager.shared.pasteboardProvider = { testPasteboard }
     ClotheslineManager.shared.tempDirOverride = testTempDirURL.path
 
-    defer {
-        ClotheslineManager.shared.pasteboardProvider = { .general }
-        ClotheslineManager.shared.tempDirOverride = nil
-        testPasteboard.releaseGlobally()
-        try? FileManager.default.removeItem(at: testTempDirURL)
+    let finishTests: @MainActor () async -> Int32 = {
+        defer {
+            ClotheslineManager.shared.pasteboardProvider = { .general }
+            ClotheslineManager.shared.tempDirOverride = nil
+            testPasteboard.releaseGlobally()
+            try? FileManager.default.removeItem(at: testTempDirURL)
+        }
+        await t.waitForAsyncTests()
+        return t.summary()
     }
 
     let suites: [RegisteredTestSuite] = [
@@ -266,7 +280,8 @@ func runAllTests(filter explicitFilter: String? = nil) -> Int32 {
             for s in suites {
                 fputs("  - \(s.id): \(s.title)\n", stderr)
             }
-            return 1
+            t.failed += 1
+            return finishTests
         }
         print("🚀 Running ClipLine Test Suites matching '\(activeFilter!)' (\(matchedSuites.count)/\(suites.count))...\n")
     } else {
@@ -278,5 +293,5 @@ func runAllTests(filter explicitFilter: String? = nil) -> Int32 {
         suite.run(t, testPasteboard, testTempDirURL)
     }
 
-    return t.summary()
+    return finishTests
 }

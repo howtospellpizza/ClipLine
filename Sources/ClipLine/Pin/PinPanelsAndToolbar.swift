@@ -3,6 +3,112 @@ import SwiftUI
 
 // MARK: - Detached Floating Toolbar View (SwiftUI inside its own auto-sizing NSPanel)
 
+// MARK: - Instant Custom Hover Tooltip Modifier (replaces sluggish macOS .help delay)
+
+final class ToolbarHoverTrackingNSView: NSView {
+    var tooltipText: String = ""
+    weak var vm: PinSessionViewModel?
+    private var trackingArea: NSTrackingArea?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard !tooltipText.isEmpty else { return }
+        vm?.hoveredToolbarTooltip = tooltipText
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if vm?.hoveredToolbarTooltip == tooltipText {
+            vm?.hoveredToolbarTooltip = nil
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil, vm?.hoveredToolbarTooltip == tooltipText {
+            vm?.hoveredToolbarTooltip = nil
+        }
+    }
+}
+
+private struct ToolbarHoverTrackingRepresentable: NSViewRepresentable {
+    let text: String
+    @ObservedObject var vm: PinSessionViewModel
+
+    func makeNSView(context: Context) -> ToolbarHoverTrackingNSView {
+        let v = ToolbarHoverTrackingNSView()
+        v.tooltipText = text
+        v.vm = vm
+        return v
+    }
+
+    func updateNSView(_ nsView: ToolbarHoverTrackingNSView, context: Context) {
+        nsView.tooltipText = text
+        nsView.vm = vm
+    }
+}
+
+private struct ToolbarHoverTooltipModifier: ViewModifier {
+    let text: String
+    @ObservedObject var vm: PinSessionViewModel
+
+    func body(content: Content) -> some View {
+        content
+            .background(ToolbarHoverTrackingRepresentable(text: text, vm: vm))
+            .accessibilityLabel(text)
+            .help(text)
+    }
+}
+
+private extension View {
+    func toolbarTooltip(_ text: String, vm: PinSessionViewModel) -> some View {
+        modifier(ToolbarHoverTooltipModifier(text: text, vm: vm))
+    }
+}
+
+/// Tall vertical frame split by a dashed stitch seam into two stacked frames, with a downward scroll arrow
+private struct ScrollingCaptureToolbarIcon: View {
+    var body: some View {
+        ZStack {
+            // Tall outer frame (width 11, height 17)
+            RoundedRectangle(cornerRadius: 2.2, style: .continuous)
+                .strokeBorder(lineWidth: 1.45)
+                .frame(width: 11, height: 17)
+
+            // Horizontal dashed stitch seam separating top & bottom frames
+            Path { p in
+                p.move(to: CGPoint(x: 1.5, y: 7.5))
+                p.addLine(to: CGPoint(x: 9.5, y: 7.5))
+            }
+            .stroke(style: StrokeStyle(lineWidth: 1.2, lineCap: .round, dash: [1.8, 1.4]))
+            .frame(width: 11, height: 17)
+
+            // Downward scroll arrow in the lower stitched section
+            Image(systemName: "arrow.down")
+                .font(.system(size: 6.5, weight: .black))
+                .offset(y: 3.2)
+        }
+        .frame(width: 16, height: 18)
+    }
+}
+
 struct PinToolbarView: View {
     @ObservedObject var vm: PinSessionViewModel
     var onOpenSettings: (() -> Void)? = nil
@@ -49,7 +155,7 @@ struct PinToolbarView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(tool.localizedName)
+                .toolbarTooltip(tool.localizedName, vm: vm)
             }
 
             let selectedTool: PinAnnotation.Tool? = vm.annotations.first(where: { $0.id == vm.selectedTextAnnotationID })?.tool
@@ -79,7 +185,7 @@ struct PinToolbarView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .help(preset.localizedTooltip)
+                            .toolbarTooltip(preset.localizedTooltip, vm: vm)
                         }
                     }
                 }
@@ -171,7 +277,7 @@ struct PinToolbarView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .help(L10n.emojiMorePickerTooltip)
+                        .toolbarTooltip(L10n.emojiMorePickerTooltip, vm: vm)
                     }
                 }
 
@@ -212,7 +318,7 @@ struct PinToolbarView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .help(bgStyle.localizedTooltip)
+                            .toolbarTooltip(bgStyle.localizedTooltip, vm: vm)
                         }
                     }
                 }
@@ -228,7 +334,7 @@ struct PinToolbarView: View {
             }
             .buttonStyle(.plain)
             .disabled(!vm.canUndo)
-            .help(L10n.toolbarUndoTooltip)
+            .toolbarTooltip(L10n.toolbarUndoTooltip, vm: vm)
 
             Button(action: { vm.redo() }) {
                 Image(systemName: "arrow.uturn.forward")
@@ -238,60 +344,58 @@ struct PinToolbarView: View {
             }
             .buttonStyle(.plain)
             .disabled(!vm.canRedo)
-            .help(L10n.toolbarRedoTooltip)
+            .toolbarTooltip(L10n.toolbarRedoTooltip, vm: vm)
 
             Button(action: { vm.runOCR(andTranslate: false) }) {
-                HStack(spacing: 3) {
-                    Image(systemName: "text.viewfinder")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("OCR")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .padding(.horizontal, 5)
-                .frame(height: 24)
-                .background(Color.primary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(L10n.toolbarOCRTooltip)
-
-            Button(action: { vm.runOCR(andTranslate: true) }) {
-                HStack(spacing: 3) {
-                    Image(systemName: "character.bubble.fill")
-                        .font(.system(size: 11.5, weight: .semibold))
-                    Text(L10n.toolbarTranslateShortLabel)
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .padding(.horizontal, 5)
-                .frame(height: 24)
-                .background(Color.accentColor.opacity(0.18))
-                .foregroundColor(.accentColor)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(L10n.toolbarTranslateTooltip)
-
-            Button(action: { vm.runQRCodeScan() }) {
-                Image(systemName: "qrcode.viewfinder")
+                Image(systemName: "text.viewfinder")
                     .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 22, height: 24)
+                    .frame(width: 24, height: 24)
                     .background(Color.primary.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 5))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(L10n.toolbarQRTooltip)
+            .toolbarTooltip(L10n.toolbarOCRTooltip, vm: vm)
 
-            Button(action: { vm.saveToFile() }) {
-                Image(systemName: "square.and.arrow.down")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 22, height: 24)
+            Button(action: { vm.runOCR(andTranslate: true) }) {
+                Image(systemName: "character.bubble.fill")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .frame(width: 24, height: 24)
+                    .background(Color.accentColor.opacity(0.18))
+                    .foregroundColor(.accentColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(L10n.toolbarSaveTooltip)
+            .toolbarTooltip(L10n.toolbarTranslateTooltip, vm: vm)
+
+            Button(action: { vm.runQRCodeScan() }) {
+                Image(systemName: "qrcode.viewfinder")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 24, height: 24)
+                    .background(Color.primary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .toolbarTooltip(L10n.toolbarQRTooltip, vm: vm)
+
+            if let onStartScroll = vm.onStartScrollingCapture {
+                Button(action: {
+                    DispatchQueue.main.async {
+                        onStartScroll()
+                    }
+                }) {
+                    ScrollingCaptureToolbarIcon()
+                        .frame(width: 24, height: 24)
+                        .background(Color.cyan.opacity(0.18))
+                        .foregroundColor(.cyan)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .toolbarTooltip(L10n.toolbarScrollingCaptureTooltip, vm: vm)
+            }
 
             Divider().frame(height: 16)
 
@@ -310,7 +414,7 @@ struct PinToolbarView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(L10n.toolbarClipTooltip)
+            .toolbarTooltip(L10n.toolbarClipTooltip, vm: vm)
 
             Button(action: {
                 if vm.copyToClipboard() {
@@ -331,7 +435,16 @@ struct PinToolbarView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(L10n.toolbarCopyTooltip)
+            .toolbarTooltip(L10n.toolbarCopyTooltip, vm: vm)
+
+            Button(action: { vm.saveToFile() }) {
+                Image(systemName: "square.and.arrow.down")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .toolbarTooltip(L10n.toolbarSaveTooltip, vm: vm)
 
             Button(action: { onOpenSettings?() }) {
                 Image(systemName: "keyboard")
@@ -341,7 +454,7 @@ struct PinToolbarView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(L10n.shortcutMenuSettings)
+            .toolbarTooltip(L10n.shortcutMenuSettings, vm: vm)
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
@@ -351,7 +464,7 @@ struct PinToolbarView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(L10n.toolbarCloseTooltip)
+            .toolbarTooltip(L10n.toolbarCloseTooltip, vm: vm)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -362,8 +475,31 @@ struct PinToolbarView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.primary.opacity(0.18), lineWidth: 1)
         )
+        .overlay(alignment: .bottom) {
+            if let tooltip = vm.hoveredToolbarTooltip, !tooltip.isEmpty {
+                Text(tooltip)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3.5)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.black.opacity(0.90))
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .stroke(Color.white.opacity(0.18), lineWidth: 0.6)
+                            )
+                    )
+                    .shadow(color: .black.opacity(0.28), radius: 3, x: 0, y: 1.5)
+                    .fixedSize()
+                    .offset(y: 26)
+                    .allowsHitTesting(false)
+            }
+        }
         .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 2)
-        .padding(6)
+        .padding(.top, 6)
+        .padding(.horizontal, 6)
+        .padding(.bottom, 28)
     }
 }
 
@@ -375,6 +511,25 @@ final class PinToolbarPanel: NSPanel {
     var onOpenSettings: (() -> Void)?
 
     override var canBecomeKey: Bool { true }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown || event.type == .rightMouseDown {
+            if !NSApp.isActive {
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
+        let windowBeforeEvent = NSApp.keyWindow
+        super.sendEvent(event)
+        if event.type == .leftMouseUp,
+           isVisible,
+           let hosting = viewModel?.hostingPanel,
+           hosting.isVisible,
+           hosting.viewModel?.pendingTextNormalizedPos == nil,
+           (NSApp.keyWindow == nil || NSApp.keyWindow === self || NSApp.keyWindow === hosting || NSApp.keyWindow === windowBeforeEvent) {
+            hosting.makeKeyAndOrderFront(nil)
+            order(.above, relativeTo: hosting.windowNumber)
+        }
+    }
 
     func refreshToolbarRootView() {
         guard let vm = viewModel,
@@ -523,6 +678,10 @@ final class PinFloatingPanel: NSPanel {
         }
         if unmodifiedLetter && chars == "t" {
             vm.runOCR(andTranslate: true)
+            return
+        }
+        if unmodifiedLetter && chars == "l" {
+            vm.onStartScrollingCapture?()
             return
         }
         if chars == "=" || chars == "+" {

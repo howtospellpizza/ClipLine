@@ -99,6 +99,7 @@ final class PinSessionViewModel: ObservableObject {
         }
     }
     @Published var scale: CGFloat = 1.0
+    var minScale: CGFloat = 0.35
     @Published var windowOpacity: Double = 1.0
     @Published var showToolbar: Bool = true {
         didSet {
@@ -106,6 +107,7 @@ final class PinSessionViewModel: ObservableObject {
         }
     }
     @Published var toastMessage: String? = nil
+    @Published var hoveredToolbarTooltip: String? = nil
     @Published var isPerformingOCR: Bool = false
     @Published var isClosed: Bool = false
     var activeOCRTask: Task<Void, Never>? = nil
@@ -122,6 +124,7 @@ final class PinSessionViewModel: ObservableObject {
 
     weak var hostingPanel: PinFloatingPanel?
     weak var toolbarPanel: NSPanel?
+    var onStartScrollingCapture: (() -> Void)? = nil
 
     /// Exact margin around the image inside `hostingPanel` so 8 resize handles sit comfortably inside the window
     static let canvasMargin: CGFloat = 16
@@ -1403,7 +1406,7 @@ final class PinSessionViewModel: ObservableObject {
     }
 
     func updateZoom(delta: CGFloat) {
-        let newScale = max(0.35, min(3.0, scale + delta))
+        let newScale = max(minScale, min(3.0, scale + delta))
         scale = newScale
         guard let panel = hostingPanel else { return }
         let newW = round(baseSize.width * newScale + Self.canvasMargin * 2)
