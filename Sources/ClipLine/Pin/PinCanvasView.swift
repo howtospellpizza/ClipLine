@@ -325,7 +325,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
         let maxX = viewPts.map(\.x).max() ?? 0
         let minY = viewPts.map(\.y).min() ?? 0
         let maxY = viewPts.map(\.y).max() ?? 0
-        if item.tool == .spotlight {
+        if item.tool == .spotlight || item.tool == .rect {
             return NSRect(x: minX - 2, y: minY - 2, width: max(4, maxX - minX + 4), height: max(4, maxY - minY + 4))
         }
         let basePad = max(6.0, (item.lineWidth * vm.scale) / 2.0 + 4.0)
@@ -337,10 +337,16 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
         guard textField == nil,
               let selID = vm.selectedTextAnnotationID,
               let selItem = vm.annotations.first(where: { $0.id == selID }),
-              selItem.tool.supportsCornerResize,
-              let hitRect = textAnnotationHitRectInView(selItem) else {
+              selItem.tool.supportsCornerResize else {
             return []
         }
+        if selItem.tool == .arrow, selItem.points.count >= 2 {
+            let img = imageRectInView
+            let p0 = NSPoint(x: img.minX + selItem.points[0].x * img.width, y: img.maxY - selItem.points[0].y * img.height)
+            let p1 = NSPoint(x: img.minX + selItem.points[1].x * img.width, y: img.maxY - selItem.points[1].y * img.height)
+            return [(.topLeft, p0), (.bottomRight, p1)]
+        }
+        guard let hitRect = textAnnotationHitRectInView(selItem) else { return [] }
         let r = hitRect.insetBy(dx: 2, dy: 2)
         return [
             (.topLeft, NSPoint(x: r.minX, y: r.maxY)),
@@ -353,13 +359,19 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
     func hitTestSelectedAnnotationCornerHandle(viewPoint: NSPoint) -> PinSessionViewModel.ResizeHandle? {
         let handles = selectedAnnotationCornerHandlesInView()
         guard !handles.isEmpty else { return nil }
-        let spanX = abs((handles.first(where: { $0.0 == .topRight })?.1.x ?? 0) - (handles.first(where: { $0.0 == .topLeft })?.1.x ?? 0))
-        let spanY = abs((handles.first(where: { $0.0 == .topLeft })?.1.y ?? 0) - (handles.first(where: { $0.0 == .bottomLeft })?.1.y ?? 0))
         let selectedTool = vm.selectedTextAnnotationID.flatMap { selectedID in
             vm.annotations.first(where: { $0.id == selectedID })?.tool
         }
-        let minimumHitRadius: CGFloat = selectedTool == .spotlight ? 0.0 : 3.5
-        let hitRadius: CGFloat = min(9.0, max(minimumHitRadius, min(spanX, spanY) * 0.28))
+        let hitRadius: CGFloat
+        if selectedTool == .arrow, handles.count >= 2 {
+            let endpointDist = hypot(handles[1].1.x - handles[0].1.x, handles[1].1.y - handles[0].1.y)
+            hitRadius = min(9.0, max(4.0, endpointDist * 0.28))
+        } else {
+            let spanX = abs((handles.first(where: { $0.0 == .topRight })?.1.x ?? 0) - (handles.first(where: { $0.0 == .topLeft })?.1.x ?? 0))
+            let spanY = abs((handles.first(where: { $0.0 == .topLeft })?.1.y ?? 0) - (handles.first(where: { $0.0 == .bottomLeft })?.1.y ?? 0))
+            let minimumHitRadius: CGFloat = (selectedTool == .spotlight || selectedTool == .rect) ? 0.0 : 3.5
+            hitRadius = min(9.0, max(minimumHitRadius, min(spanX, spanY) * 0.28))
+        }
         var bestHandle: PinSessionViewModel.ResizeHandle? = nil
         var bestDist: CGFloat = .greatestFiniteMagnitude
         for (handle, pt) in handles {
@@ -656,7 +668,7 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             return
         }
 
-        // 0b. Check 4 corner resize handles of a selected committed annotation (.text, .emoji, .counter)
+        // 0b. Check 4 corner resize handles of a selected committed annotation (.text, .emoji, .counter, .spotlight, .rect, .arrow)
         if let cornerHandle = hitTestSelectedAnnotationCornerHandle(viewPoint: pt),
            let selID = vm.selectedTextAnnotationID,
            let selItem = vm.annotations.first(where: { $0.id == selID }),
@@ -664,7 +676,14 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             let insetRect = hitRect.insetBy(dx: 2, dy: 2)
             let anchorPt: NSPoint
             annotationResizeStartPoints = selItem.points
-            if selItem.tool == .text || selItem.tool == .spotlight {
+            if selItem.tool == .arrow, selItem.points.count >= 2 {
+                let img = imageRectInView
+                let fixedIdx = (cornerHandle == .topLeft) ? 1 : 0
+                anchorPt = NSPoint(
+                    x: img.minX + selItem.points[fixedIdx].x * img.width,
+                    y: img.maxY - selItem.points[fixedIdx].y * img.height
+                )
+            } else if selItem.tool == .text || selItem.tool == .spotlight || selItem.tool == .rect {
                 // Opposite corner of the dragged handle stays fixed while the annotation scales around it
                 anchorPt = NSPoint(
                     x: (cornerHandle == .topLeft || cornerHandle == .bottomLeft) ? insetRect.maxX : insetRect.minX,
@@ -845,7 +864,33 @@ final class PinCanvasNSView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
             }
             let pt = convert(event.locationInWindow, from: nil)
             let tool = vm.annotations[idx].tool
-            if tool == .spotlight {
+            if tool == .arrow {
+                let img = imageRectInView
+                let anchorNorm = CGPoint(
+                    x: max(0, min(1, (annotationResizeAnchorViewPoint.x - img.minX) / max(1, img.width))),
+                    y: max(0, min(1, (img.maxY - annotationResizeAnchorViewPoint.y) / max(1, img.height)))
+                )
+                let curNorm = CGPoint(
+                    x: max(0, min(1, (pt.x - img.minX) / max(1, img.width))),
+                    y: max(0, min(1, (img.maxY - pt.y) / max(1, img.height)))
+                )
+                let dist = hypot((curNorm.x - anchorNorm.x) * img.width, (curNorm.y - anchorNorm.y) * img.height)
+                if dist >= 6.0 {
+                    if !annotationResizeDidChange {
+                        vm.recordUndoSnapshot()
+                        annotationResizeDidChange = true
+                    }
+                    if cornerHandle == .topLeft {
+                        vm.annotations[idx].points = [curNorm, anchorNorm]
+                    } else {
+                        vm.annotations[idx].points = [anchorNorm, curNorm]
+                    }
+                    needsDisplay = true
+                }
+                cornerHandle.cursor.set()
+                return
+            }
+            if tool == .spotlight || tool == .rect {
                 let img = imageRectInView
                 let anchorNorm = CGPoint(
                     x: max(0, min(1, (annotationResizeAnchorViewPoint.x - img.minX) / max(1, img.width))),

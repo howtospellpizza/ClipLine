@@ -180,6 +180,13 @@ enum L10n {
         }
     }
 
+    static var toolbarRedoTooltip: String {
+        switch AppLanguage.current {
+        case .en: return "Redo (Cmd+Shift+Z)"
+        case .zhHans: return "重做 (Cmd+Shift+Z)"
+        }
+    }
+
     static var toolbarQRTooltip: String {
         switch AppLanguage.current {
         case .en: return "Scan QR code / barcode and copy (Q)"
@@ -418,8 +425,8 @@ enum L10n {
 
     static var clotheslinePhotoHelp: String {
         switch AppLanguage.current {
-        case .en: return "Drag photo to drop into apps · Click: select/deselect · Double-click: restore to edit · Drag top rope: move bar"
-        case .zhHans: return "按住照片可直接拖进聊天框/应用 · 单击：勾选/取消 · 双击：取下继续标注 · 拖顶部绳子：移动晾衣绳"
+        case .en: return "Drag photo to reorder or drop into apps · Click: select/deselect · Double-click: restore to edit · Drag top rope: move bar"
+        case .zhHans: return "按住照片左右拖动可调整顺序，拖出可直接发给微信/应用 · 单击：勾选/取消 · 双击：取下继续标注 · 拖顶部绳子：移动晾衣绳"
         }
     }
 

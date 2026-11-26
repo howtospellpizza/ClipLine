@@ -222,13 +222,23 @@ struct PinToolbarView: View {
 
             Button(action: { vm.undo() }) {
                 Image(systemName: "arrow.uturn.backward")
-                    .font(.system(size: 12))
-                    .frame(width: 22, height: 24)
+                    .font(.system(size: 11.5))
+                    .frame(width: 20, height: 24)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(!vm.canUndo)
             .help(L10n.toolbarUndoTooltip)
+
+            Button(action: { vm.redo() }) {
+                Image(systemName: "arrow.uturn.forward")
+                    .font(.system(size: 11.5))
+                    .frame(width: 20, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!vm.canRedo)
+            .help(L10n.toolbarRedoTooltip)
 
             Button(action: { vm.runOCR(andTranslate: false) }) {
                 HStack(spacing: 3) {
@@ -487,7 +497,11 @@ final class PinFloatingPanel: NSPanel {
             return
         }
         if flags.contains(.command) && chars == "z" {
-            vm.undo()
+            if flags.contains(.shift) {
+                vm.redo()
+            } else {
+                vm.undo()
+            }
             return
         }
         if flags.contains(.command) && chars == "c" {

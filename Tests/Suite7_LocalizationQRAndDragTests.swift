@@ -51,7 +51,7 @@ func runSuite7LocalizationQRAndDragTests(_ t: TestHarness, testPasteboard: NSPas
     let enToolbarWidth = enVM.toolbarPanel?.frame.width ?? 0
     let screenVisibleWidth = max(1280, (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame.width ?? 1440)
     t.check(
-        enToolbarWidth > 500 && enToolbarWidth < min(1100, screenVisibleWidth - 16),
+        enToolbarWidth > 500 && enToolbarWidth < min(1140, screenVisibleWidth - 16),
         "English toolbar in widest (.text) state fits cleanly within screen bounds (\(Int(enToolbarWidth))pt)"
     )
     enVM.hostingPanel?.onClosePanel?()
