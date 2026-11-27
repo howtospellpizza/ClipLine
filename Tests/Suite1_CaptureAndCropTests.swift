@@ -124,8 +124,67 @@ private func runAsyncScrollingCaptureTests(
     seedGate.resolveRequest(0, with: frame1)
     await seedTask?.value
     t.check(
-        seedCallbackCount == 1 && seedResult == nil && seedController.activeScrollingSession == nil,
-        "Cancelling a pending direct-Pin seed suppresses the late capture result and completes only once"
+        seedCallbackCount == 1 && seedResult == nil && seedController.activeScrollingSession == nil && !seedController.hasPendingScrollingEscapeMonitors,
+        "Cancelling a pending direct-Pin seed suppresses the late capture result, cleans up pending cancel monitors/UI, and completes only once"
+    )
+
+    // Verify bare Escape cancels a gated pending seed via monitor seam, while modified Escape does not,
+    // and completing the seed cleans up the pending monitors/panel.
+    let escSeedController = ScreenCaptureOverlayController()
+    let escGate = AsyncScrollingCaptureGate()
+    escSeedController.scrollingRegionCaptureProvider = { rect in await escGate.capture(rect) }
+    var installedGlobalHandler: ((NSEvent) -> Void)?
+    var installedLocalHandler: ((NSEvent) -> NSEvent?)?
+    var removedTokens: [String] = []
+    escSeedController.globalKeyMonitorInstaller = { handler in
+        installedGlobalHandler = handler
+        return "global-token"
+    }
+    escSeedController.localKeyMonitorInstaller = { handler in
+        installedLocalHandler = handler
+        return "local-token"
+    }
+    escSeedController.keyMonitorRemover = { token in
+        if let s = token as? String { removedTokens.append(s) }
+    }
+    var escSeedResult: CaptureSelectionResult? = selection
+    var escSeedCallbacks = 0
+    let escSeedTask = escSeedController.beginDirectScrollingCapture(initialSelection: selection) { res in
+        escSeedCallbacks += 1
+        escSeedResult = res
+    }
+    await escGate.waitForRequest(1)
+    if let cmdEsc = NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: [.command],
+        timestamp: 0, windowNumber: 0, context: nil,
+        characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53
+    ) {
+        let localRet = installedLocalHandler?(cmdEsc)
+        installedGlobalHandler?(cmdEsc)
+        t.check(
+            localRet != nil && escSeedController.isScrollingCapturePending && escSeedCallbacks == 0,
+            "Modified Cmd+Escape does not cancel a pending scrolling seed"
+        )
+    }
+    if let bareEsc = NSEvent.keyEvent(
+        with: .keyDown, location: .zero, modifierFlags: [],
+        timestamp: 0, windowNumber: 0, context: nil,
+        characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53
+    ) {
+        installedGlobalHandler?(bareEsc)
+    }
+    escGate.resolveRequest(0, with: frame1)
+    await escSeedTask?.value
+    t.check(
+        escSeedCallbacks == 1 && escSeedResult == nil && !escSeedController.isScrollingCapturePending && !escSeedController.hasPendingScrollingEscapeMonitors && removedTokens.sorted() == ["global-token", "local-token"],
+        "Bare Escape via pending monitor cancels gated scrolling seed once and removes all pending monitors/UI"
+    )
+
+    t.check(
+        ScreenCaptureOverlayController.shouldAllowOwnExclusionFilter(ownApplicationCount: 0, ownWindowCount: 0) &&
+        ScreenCaptureOverlayController.shouldAllowOwnExclusionFilter(ownApplicationCount: 1, ownWindowCount: 1) &&
+        !ScreenCaptureOverlayController.shouldAllowOwnExclusionFilter(ownApplicationCount: 0, ownWindowCount: 2),
+        "ScreenCaptureKit own-exclusion predicate permits windowless daemon seed while failing closed if own windows lack an app entry"
     )
 
     let sampleGate = AsyncScrollingCaptureGate()
@@ -1360,26 +1419,31 @@ func runSuite1CaptureAndCropTests(_ t: TestHarness, testPasteboard: NSPasteboard
                     balReplayMatched = (balStitcher.appendFrame(balVpImg) == .unchanged)
                 }
 
-                // Also verify a 360-row viewport (300-row overlap at shift 32) where all 4 balanced-RGB anchor rows
-                // have localized +/-8 noise (`d0..d3 == 768`, full MAD == 0.107 <= 11.5) still stitches cleanly!
+                // Also verify balanced-RGB noisy anchor/probe edge cases:
+                // 1) 360-row viewport (29px trim, 270px overlap at shift 32 -> exact anchors at [29, 119, 209, 298]) with +/-8 balanced noise
+                // 2) 1400-row viewport (112px trim, 1128px overlap at shift 48 -> length >= 1024) with 8 noisy balanced rows (MAD = 0.142 <= 11.5)
+                // 3) 1800-row balanced replay with 9 noisy probe rows (MAD = 0.190 <= 6.0)
                 let balScroll0 = Array(balDocRows[0..<360])
                 var balScroll32 = Array(balDocRows[32..<392])
-                let overlapLen300 = 300
-                for a in [0, overlapLen300 / 3, (overlapLen300 * 2) / 3, overlapLen300 - 1] {
-                    let rowIdx = 28 + a
+                let bal360Trim = Int((360.0 * ScrollingImageStitcher.stickyHeaderTrimRatio).rounded()) // 29
+                let bal360Overlap = 360 - bal360Trim - bal360Trim - 32 // 270
+                func perturbBalancedRow(_ row: inout [UInt8], delta: UInt8) {
                     for p in 0..<16 {
                         for c in 0..<3 {
                             let c0 = (p * 2) * 3 + c
                             let c1 = (p * 2 + 1) * 3 + c
-                            if balScroll32[rowIdx][c0] < 128 {
-                                balScroll32[rowIdx][c0] &+= 8
-                                balScroll32[rowIdx][c1] &-= 8
+                            if row[c0] < 128 {
+                                row[c0] &+= delta
+                                row[c1] &-= delta
                             } else {
-                                balScroll32[rowIdx][c0] &-= 8
-                                balScroll32[rowIdx][c1] &+= 8
+                                row[c0] &-= delta
+                                row[c1] &+= delta
                             }
                         }
                     }
+                }
+                for a in [0, bal360Overlap / 3, (bal360Overlap * 2) / 3, bal360Overlap - 1] {
+                    perturbBalancedRow(&balScroll32[bal360Trim + a], delta: 8)
                 }
                 var balAnchorMatched = false
                 if let b0Img = makeBalancedReplayImage(balScroll0),
@@ -1388,10 +1452,50 @@ func runSuite1CaptureAndCropTests(_ t: TestHarness, testPasteboard: NSPasteboard
                     balAnchorMatched = (bStitcher.appendFrame(b32Img) == .appended(addedPixels: 32, totalPixelHeight: 392))
                 }
 
+                let balLongDoc: [[UInt8]] = (0..<2200).map { y in
+                    var s = UInt64(y + 1) &* 0x9E3779B97F4A7C15
+                    var r = [UInt8](repeating: 128, count: 96)
+                    for p in 0..<16 {
+                        s = (s ^ (s >> 30)) &* 0xBF58476D1CE4E5B9
+                        for c in 0..<3 {
+                            let v: UInt8 = ((s >> c) & 1) == 0 ? 1 : 255
+                            r[(p * 2) * 3 + c] = v
+                            r[(p * 2 + 1) * 3 + c] = UInt8(256 - Int(v))
+                        }
+                    }
+                    return r
+                }
+                let balLong0 = Array(balLongDoc[0..<1400])
+                var balLong48 = Array(balLongDoc[48..<1448])
+                let longTrim = Int((1400.0 * ScrollingImageStitcher.stickyHeaderTrimRatio).rounded()) // 112
+                let longOverlap = 1400 - longTrim - longTrim - 48 // 1128 >= 1024
+                for a in [0, longOverlap / 3, (longOverlap * 2) / 3, longOverlap - 1, 16, 32, 48, 64] {
+                    perturbBalancedRow(&balLong48[longTrim + a], delta: 20)
+                }
+                var balLongMatched = false
+                if let bl0 = makeBalancedReplayImage(balLong0),
+                   let bl48 = makeBalancedReplayImage(balLong48) {
+                    var blStitcher = ScrollingImageStitcher(initialFrame: bl0, scaleFactor: 1.0)
+                    balLongMatched = (blStitcher.appendFrame(bl48, directionHint: .downward) == .appended(addedPixels: 48, totalPixelHeight: 1448))
+                }
+
+                var balNineProbeViewport = Array(balLongDoc[200..<2000])
+                let replayInterior = 1800 - 144 - 144 // 1512
+                for k in 0..<9 {
+                    let dy = (k * (replayInterior - 1)) / 11
+                    perturbBalancedRow(&balNineProbeViewport[144 + dy], delta: 32)
+                }
+                var balNineProbeReplayMatched = false
+                if let blAcc = makeBalancedReplayImage(balLongDoc),
+                   let blVp = makeBalancedReplayImage(balNineProbeViewport) {
+                    var brStitcher = ScrollingImageStitcher(initialFrame: blAcc, scaleFactor: 2.0)
+                    balNineProbeReplayMatched = (brStitcher.appendFrame(blVp) == .unchanged)
+                }
+
                 t.check(
-                    decoyRes == .unchanged && balReplayMatched && balAnchorMatched,
-                    "ScrollingImageStitcher replay deduplication finds genuine match past 40 non-overlapping sparse-probe decoys, when 3 balanced-RGB probe rows have localized transient artifacts (MAD 5.71 <= 6.0), and when all 4 anchor rows of a 300-row overlap have +/-8 balanced noise",
-                    detail: "decoyRes=\(decoyRes), balReplayMatched=\(balReplayMatched), balAnchorMatched=\(balAnchorMatched)"
+                    decoyRes == .unchanged && balReplayMatched && balAnchorMatched && balLongMatched && balNineProbeReplayMatched,
+                    "ScrollingImageStitcher replay & directional matching find genuine matches past 40 decoys, 9 noisy balanced probe rows, exact 4-anchor noise (29/119/209/298), and 8 noisy rows on >=1024px overlap",
+                    detail: "decoyRes=\(decoyRes), balReplayMatched=\(balReplayMatched), balAnchorMatched=\(balAnchorMatched), balLongMatched=\(balLongMatched), balNineProbeReplayMatched=\(balNineProbeReplayMatched)"
                 )
             } else {
                 t.check(false, "Created 40 non-overlapping decoy replay frames")
@@ -1697,10 +1801,17 @@ func runSuite1CaptureAndCropTests(_ t: TestHarness, testPasteboard: NSPasteboard
                     editedVM.annotations.append(PinAnnotation(tool: .rect, color: .red, lineWidth: 3, points: [CGPoint(x: 0.2, y: 0.2), CGPoint(x: 0.7, y: 0.7)]))
                     editedVM.onStartScrollingCapture?()
                     let hiddenDuringSelect = !editedPanel.isVisible && editedPanel.sharingType == .none && !editedVM.isClosed
+                    let tbHiddenDuringSelect = editedVM.toolbarPanel.map { !$0.isVisible && $0.sharingType == .none } ?? false
                     daemonForScroll.captureController.cancelActiveCapture(reason: "test cancel")
+                    let tbRestored = editedVM.toolbarPanel.map { tb in
+                        tb.isVisible &&
+                        tb.sharingType == .readOnly &&
+                        tb.alphaValue == 1 &&
+                        editedPanel.childWindows?.contains(tb) == true
+                    } ?? false
                     t.check(
-                        hiddenDuringSelect && editedPanel.isVisible && editedPanel.sharingType == .readOnly && editedPanel.alphaValue == 1 && !editedVM.isClosed && editedVM.annotations.count == 1,
-                        "Cancelling scrolling capture started from an annotated Pin restores the original Pin, its sharingType/alphaValue, and its annotations"
+                        hiddenDuringSelect && tbHiddenDuringSelect && editedPanel.isVisible && editedPanel.sharingType == .readOnly && editedPanel.alphaValue == 1 && tbRestored && !editedVM.isClosed && editedVM.annotations.count == 1,
+                        "Cancelling scrolling capture started from an annotated Pin restores the original Pin, its attached toolbar, sharingType/alphaValue, and its annotations"
                     )
                     editedPanel.onClosePanel?()
                 } else {

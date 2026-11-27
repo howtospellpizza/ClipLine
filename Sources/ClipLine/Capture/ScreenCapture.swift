@@ -15,7 +15,18 @@ final class ScreenCaptureOverlayController {
     private var isCursorHidden = false
     private var pendingScrollingCaptureTask: Task<Void, Never>?
     private var pendingScrollingEscapeGlobalMonitor: Any?
+    private var pendingScrollingEscapeLocalMonitor: Any?
+    private var pendingScrollingCancelPanel: NSPanel?
     private var scrollingCaptureGeneration: UInt64 = 0
+    var globalKeyMonitorInstaller: ((@escaping (NSEvent) -> Void) -> Any?) = { handler in
+        NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: handler)
+    }
+    var localKeyMonitorInstaller: ((@escaping (NSEvent) -> NSEvent?) -> Any?) = { handler in
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: handler)
+    }
+    var keyMonitorRemover: (Any) -> Void = { monitor in
+        NSEvent.removeMonitor(monitor)
+    }
     var preflightAccess: () -> Bool = { ScreenCaptureOverlayController.hasLiveScreenCaptureAccess() }
     var requestAccess: () -> Bool = { CGRequestScreenCaptureAccess() }
     var presentPermissionAlert: () -> Void = { ScreenCaptureOverlayController.presentScreenRecordingPermissionAlertIfNeeded() }
@@ -63,6 +74,13 @@ final class ScreenCaptureOverlayController {
         )
     }
 
+    nonisolated static func shouldAllowOwnExclusionFilter(
+        ownApplicationCount: Int,
+        ownWindowCount: Int
+    ) -> Bool {
+        !(ownApplicationCount == 0 && ownWindowCount > 0)
+    }
+
     func captureScrollingScreenRectImage(_ screenRect: NSRect) async -> CGImage? {
         if let scrollingRegionCaptureProvider {
             return await scrollingRegionCaptureProvider(screenRect)
@@ -87,7 +105,10 @@ final class ScreenCaptureOverlayController {
             let ownPID = ProcessInfo.processInfo.processIdentifier
             let ownApplications = shareableContent.applications.filter { $0.processID == ownPID }
             let ownWindows = shareableContent.windows.filter { $0.owningApplication?.processID == ownPID }
-            if ownApplications.isEmpty && !ownWindows.isEmpty {
+            guard Self.shouldAllowOwnExclusionFilter(
+                ownApplicationCount: ownApplications.count,
+                ownWindowCount: ownWindows.count
+            ) else {
                 return nil
             }
 
@@ -386,9 +407,66 @@ final class ScreenCaptureOverlayController {
 
     private func removePendingScrollingEscapeMonitor() {
         if let pendingScrollingEscapeGlobalMonitor {
-            NSEvent.removeMonitor(pendingScrollingEscapeGlobalMonitor)
+            keyMonitorRemover(pendingScrollingEscapeGlobalMonitor)
             self.pendingScrollingEscapeGlobalMonitor = nil
         }
+        if let pendingScrollingEscapeLocalMonitor {
+            keyMonitorRemover(pendingScrollingEscapeLocalMonitor)
+            self.pendingScrollingEscapeLocalMonitor = nil
+        }
+        pendingScrollingCancelPanel?.orderOut(nil)
+        pendingScrollingCancelPanel = nil
+    }
+
+    private static func makePendingScrollingCancelButtonPanel(
+        near screenRect: NSRect,
+        onCancel: @escaping () -> Void
+    ) -> NSPanel {
+        let panelW: CGFloat = 104
+        let panelH: CGFloat = 34
+        let screen = NSScreen.screens.first(where: { $0.frame.intersects(screenRect) }) ?? NSScreen.main ?? NSScreen.screens.first
+        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        var x = screenRect.maxX + 14
+        var y = screenRect.midY - panelH / 2
+        if x + panelW > visible.maxX - 8 {
+            x = screenRect.minX - panelW - 14
+        }
+        if x < visible.minX + 8 {
+            x = max(visible.minX + 8, min(visible.maxX - panelW - 8, screenRect.midX - panelW / 2))
+            y = screenRect.minY - panelH - 12
+            if y < visible.minY + 8 {
+                y = min(visible.maxY - panelH - 8, screenRect.maxY + 12)
+            }
+        }
+        y = max(visible.minY + 8, min(visible.maxY - panelH - 8, y))
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: round(x), y: round(y), width: panelW, height: panelH),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isFloatingPanel = true
+        panel.level = .screenSaver
+        panel.sharingType = .none
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.contentView = NSHostingView(
+            rootView: Button(action: onCancel) {
+                Text(L10n.scrollingCaptureCancelButton)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8))
+            }
+            .buttonStyle(.plain)
+        )
+        return panel
     }
 
     private func startScrollingCapture(initialSelection: CaptureSelectionResult) -> Task<Void, Never>? {
@@ -411,16 +489,33 @@ final class ScreenCaptureOverlayController {
             return nil
         }
 
-        pendingScrollingEscapeGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        let handlePendingEscape: (Bool) -> Bool = { [weak self] isBareEscape in
+            guard isBareEscape, let self, self.pendingScrollingCaptureTask != nil else { return false }
+            self.cancelActiveCapture(reason: "escape during pending scrolling seed")
+            return true
+        }
+        pendingScrollingEscapeGlobalMonitor = globalKeyMonitorInstaller { event in
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                .subtracting([.numericPad, .function])
+            let isBareEscape = mods.isEmpty && event.keyCode == 53
             MainActor.assumeIsolated {
-                guard let self, self.pendingScrollingCaptureTask != nil else { return }
-                let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                    .subtracting([.numericPad, .function])
-                if mods.isEmpty && event.keyCode == 53 {
-                    self.cancelActiveCapture(reason: "escape during pending scrolling seed")
-                }
+                _ = handlePendingEscape(isBareEscape)
             }
         }
+        pendingScrollingEscapeLocalMonitor = localKeyMonitorInstaller { event in
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                .subtracting([.numericPad, .function])
+            let isBareEscape = mods.isEmpty && event.keyCode == 53
+            let handled = MainActor.assumeIsolated {
+                handlePendingEscape(isBareEscape)
+            }
+            return handled ? nil : event
+        }
+        let cancelPanel = Self.makePendingScrollingCancelButtonPanel(near: initialSelection.selectedScreenRect) { [weak self] in
+            self?.cancelActiveCapture(reason: "cancel button during pending scrolling seed")
+        }
+        cancelPanel.orderFrontRegardless()
+        pendingScrollingCancelPanel = cancelPanel
 
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -492,6 +587,10 @@ final class ScreenCaptureOverlayController {
 
     var isScrollingCapturePending: Bool {
         pendingScrollingCaptureTask != nil
+    }
+
+    var hasPendingScrollingEscapeMonitors: Bool {
+        pendingScrollingEscapeGlobalMonitor != nil || pendingScrollingEscapeLocalMonitor != nil || pendingScrollingCancelPanel != nil
     }
 
     var hasActiveOverlays: Bool {

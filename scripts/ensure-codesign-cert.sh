@@ -28,12 +28,16 @@ if [ -n "$REAL_HOME" ] && [ "${HOME:-}" != "$REAL_HOME" ]; then
     exit 0
 fi
 
+ANCHORED_FINGERPRINT=$(defaults read io.github.clipline CodesignIdentitySHA1 2>/dev/null || true)
+
 LOGIN_KEYCHAIN=$(security default-keychain -d user 2>/dev/null | sed -n 's/.*"\(.*\)".*/\1/p')
 if [ -z "$LOGIN_KEYCHAIN" ] || [ ! -f "$LOGIN_KEYCHAIN" ]; then
+    if [ -n "$ANCHORED_FINGERPRINT" ] && [ "$ALLOW_CREATE" != "1" ]; then
+        printf '❌ Default login keychain is unavailable while anchored code signing identity %s is configured.\n' "$ANCHORED_FINGERPRINT" >&2
+        exit 1
+    fi
     exit 0
 fi
-
-ANCHORED_FINGERPRINT=$(defaults read io.github.clipline CodesignIdentitySHA1 2>/dev/null || true)
 
 find_valid_identity() {
     identities=$(security find-identity -v -p codesigning "$LOGIN_KEYCHAIN" 2>/dev/null || true)

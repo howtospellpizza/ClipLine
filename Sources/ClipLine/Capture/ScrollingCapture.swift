@@ -777,18 +777,6 @@ struct ScrollingImageStitcher {
         let maxThreeProbeAllowed = maxAllowedTotal
         let maxAllProbeAllowed = maxAllowedTotal
 
-        let isLowContrastBalanced: Bool = {
-            guard interiorLen >= 512 else { return false }
-            let checkRows = min(8, interiorLen)
-            for i in 0..<checkRows {
-                if rowLowerBound(accumulatedRows[topMargin + i], nextRows[topMargin + i]) != 0 {
-                    return false
-                }
-            }
-            return true
-        }()
-        let perProbeTightDiff = samplesPerRow * 7
-
         var candidates: [(offset: Int, probeDiff: Int)] = []
         for offset in topMargin...maxOffset {
             let accWindowSum = accPrefixSum[offset + interiorLen] - accPrefixSum[offset]
@@ -806,23 +794,14 @@ struct ScrollingImageStitcher {
             }
 
             var probeDiff = quickL1
-            var tightProbeMatches = (d0Diff <= perProbeTightDiff ? 1 : 0)
-                + (dMidDiff <= perProbeTightDiff ? 1 : 0)
-                + (dLastDiff <= perProbeTightDiff ? 1 : 0)
             var exceeded = false
             for dy in probeOffsets where dy != d0 && dy != dMid && dy != dLast {
                 let rDiff = rowL1Diff(accumulatedRows[offset + dy], nextRows[topMargin + dy])
                 probeDiff += rDiff
-                if rDiff <= perProbeTightDiff {
-                    tightProbeMatches += 1
-                }
                 if probeDiff > maxAllProbeAllowed {
                     exceeded = true
                     break
                 }
-            }
-            if isLowContrastBalanced && tightProbeMatches < 4 {
-                continue
             }
             if !exceeded {
                 candidates.append((offset: offset, probeDiff: probeDiff))
@@ -877,40 +856,24 @@ struct ScrollingImageStitcher {
             }
             if probeLB == 0 {
                 // Balanced/constant row sums (`rowLowerBound == 0`): skip scanning `rowLowerBound` and accumulate
-                // exact `rowL1Diff` directly in strided order, aborting as soon as `exactTotalDiff > maxAllowedTotal`.
-                // On very large viewports (`length >= 1024`), if all 8 initial strided rows individually exceed
-                // `earlyAbortThreshold * 1.5`, abort early to avoid full-window scans on non-matching balanced noise.
-                let d0 = rowL1Diff(accumulatedRows[accStart + a0], nextRows[nextStart + a0])
-                if d0 > maxAllowedTotal { return .greatestFiniteMagnitude }
-                let d1 = rowL1Diff(accumulatedRows[accStart + a1], nextRows[nextStart + a1])
-                var exactTotalDiff = d0 + d1
+                // exact `rowL1Diff` directly in strided order, aborting only when `exactTotalDiff > maxAllowedTotal`
+                // (a strict mathematical lower bound on the full-window MAD).
+                var exactTotalDiff = rowL1Diff(accumulatedRows[accStart + a0], nextRows[nextStart + a0])
                 if exactTotalDiff > maxAllowedTotal { return .greatestFiniteMagnitude }
-                let d2 = rowL1Diff(accumulatedRows[accStart + a2], nextRows[nextStart + a2])
-                exactTotalDiff += d2
+                exactTotalDiff += rowL1Diff(accumulatedRows[accStart + a1], nextRows[nextStart + a1])
                 if exactTotalDiff > maxAllowedTotal { return .greatestFiniteMagnitude }
-                let d3 = rowL1Diff(accumulatedRows[accStart + a3], nextRows[nextStart + a3])
-                exactTotalDiff += d3
+                exactTotalDiff += rowL1Diff(accumulatedRows[accStart + a2], nextRows[nextStart + a2])
+                if exactTotalDiff > maxAllowedTotal { return .greatestFiniteMagnitude }
+                exactTotalDiff += rowL1Diff(accumulatedRows[accStart + a3], nextRows[nextStart + a3])
                 if exactTotalDiff > maxAllowedTotal { return .greatestFiniteMagnitude }
 
-                let highRowThreshold = Int((earlyAbortThreshold * Double(samplesPerRow) * 1.5).rounded(.up))
-                var allSampledRowsExceedHighThreshold = length >= 1024
-                    && d0 > highRowThreshold
-                    && d1 > highRowThreshold
-                    && d2 > highRowThreshold
-                    && d3 > highRowThreshold
-                var sampledRows = 4
                 let stride = max(2, min(16, length / 16))
                 for rem in 0..<stride {
                     var sdy = rem
                     while sdy < length {
                         if sdy != a0 && sdy != a1 && sdy != a2 && sdy != a3 {
-                            let rDiff = rowL1Diff(accumulatedRows[accStart + sdy], nextRows[nextStart + sdy])
-                            exactTotalDiff += rDiff
-                            sampledRows += 1
-                            if sampledRows <= 8 && rDiff <= highRowThreshold {
-                                allSampledRowsExceedHighThreshold = false
-                            }
-                            if exactTotalDiff > maxAllowedTotal || (sampledRows == 8 && allSampledRowsExceedHighThreshold) {
+                            exactTotalDiff += rowL1Diff(accumulatedRows[accStart + sdy], nextRows[nextStart + sdy])
+                            if exactTotalDiff > maxAllowedTotal {
                                 return .greatestFiniteMagnitude
                             }
                         }
@@ -1196,20 +1159,24 @@ final class ScrollingCaptureSessionController: ObservableObject {
         }
         lastSampleFailed = false
         let now = CFAbsoluteTimeGetCurrent()
-        let hint: ScrollingDirectionHint
-        if let scrollDeltaSnapshot {
-            hint = now - scrollDeltaSnapshot.lastEventAt <= 0.45
-                ? Self.directionHint(scrollingDeltaY: scrollDeltaSnapshot.delta)
-                : .unknown
-        } else {
-            hint = peekPendingDirectionHint(now: now)
-        }
+        let hint = Self.resolveDirectionHint(scrollDeltaSnapshot: scrollDeltaSnapshot, now: now) ?? peekPendingDirectionHint(now: now)
         var res = stitcher.appendFrame(nextCG, directionHint: hint)
         if res == .skippedNoOverlap && hint != .unknown {
             // If a non-wheel scroll (scrollbar drag, Page Up/Down, or programmatic jump) occurred after a wheel event,
             // fall back safely to unhinted bidirectional matching before reporting overlap lost!
             res = stitcher.appendFrame(nextCG, directionHint: .unknown)
         }
+        applyStitchResult(res, scrollDeltaSnapshot: scrollDeltaSnapshot, now: now)
+    }
+
+    private static func resolveDirectionHint(scrollDeltaSnapshot: ScrollDeltaSnapshot?, now: CFAbsoluteTime) -> ScrollingDirectionHint? {
+        guard let scrollDeltaSnapshot else { return nil }
+        return now - scrollDeltaSnapshot.lastEventAt <= 0.45
+            ? Self.directionHint(scrollingDeltaY: scrollDeltaSnapshot.delta)
+            : .unknown
+    }
+
+    private func applyStitchResult(_ res: ScrollingStitchResult, scrollDeltaSnapshot: ScrollDeltaSnapshot?, now: CFAbsoluteTime) {
         if case .appended = res {
             // Only consume accumulated wheel direction once a frame has actually been stitched (or expired > 0.45s)!
             // Preserving the wheel delta across `.unchanged` and transient intermediate `.skippedNoOverlap` samples
@@ -1291,7 +1258,26 @@ final class ScrollingCaptureSessionController: ObservableObject {
             )
             let nextCG = await provider(selectedScreenRect)
             guard !isFinished, !Task.isCancelled else { break }
-            processSample(nextCG, scrollDeltaSnapshot: scrollDeltaSnapshot)
+            if let nextCG {
+                let now = CFAbsoluteTimeGetCurrent()
+                let hint = Self.resolveDirectionHint(scrollDeltaSnapshot: scrollDeltaSnapshot, now: now) ?? .unknown
+                let stitcherSnapshot = stitcher
+                // Run exact row matching off the MainActor so large low-contrast frames never stall UI/Esc handling.
+                let (updatedStitcher, res) = await Task.detached(priority: .userInitiated) {
+                    var copy = stitcherSnapshot
+                    var r = copy.appendFrame(nextCG, directionHint: hint)
+                    if r == .skippedNoOverlap && hint != .unknown {
+                        r = copy.appendFrame(nextCG, directionHint: .unknown)
+                    }
+                    return (copy, r)
+                }.value
+                guard !isFinished, !Task.isCancelled else { break }
+                lastSampleFailed = false
+                stitcher = updatedStitcher
+                applyStitchResult(res, scrollDeltaSnapshot: scrollDeltaSnapshot, now: CFAbsoluteTimeGetCurrent())
+            } else {
+                processSample(nil, scrollDeltaSnapshot: scrollDeltaSnapshot)
+            }
 
             if isFinalFlush {
                 completeCapture()
