@@ -36,6 +36,10 @@ if [ -z "$LOGIN_KEYCHAIN" ] || [ ! -f "$LOGIN_KEYCHAIN" ]; then
         printf '❌ Default login keychain is unavailable while anchored code signing identity %s is configured.\n' "$ANCHORED_FINGERPRINT" >&2
         exit 1
     fi
+    if [ "$ALLOW_CREATE" = "1" ]; then
+        printf '❌ Default login keychain is unavailable; cannot create local code signing identity.\n' >&2
+        exit 1
+    fi
     exit 0
 fi
 

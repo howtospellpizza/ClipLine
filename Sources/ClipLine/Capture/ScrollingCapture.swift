@@ -525,6 +525,9 @@ struct ScrollingImageStitcher {
         }
 
             for s in minShift...maxShift {
+            if Task.isCancelled {
+                return candidates
+            }
             let overlapStart = topMargin
             let overlapEnd = compareH - bottomMargin - s
             let overlapLen = overlapEnd - overlapStart
@@ -810,26 +813,30 @@ struct ScrollingImageStitcher {
         guard !candidates.isEmpty else { return false }
         candidates.sort { $0.probeDiff < $1.probeDiff }
 
-        for cand in candidates.prefix(64) {
-            if exactMeanAbsoluteDifference(
+        // Check candidates in ascending `probeDiff` order, capping total row comparisons (not candidate count)
+        // so decoys that fail early only consume a few rows while genuine replays past 64+ decoys are still reached.
+        let maxVerificationRows = max(interiorLen * 64, 65_536)
+        var verifiedRows = 0
+        for cand in candidates {
+            if verifiedRows >= maxVerificationRows || Task.isCancelled {
+                break
+            }
+            let score = exactMeanAbsoluteDifferenceWithRowCount(
                 accumulatedRows: accumulatedRows,
                 accStart: cand.offset,
                 nextRows: nextRows,
                 nextStart: topMargin,
                 length: interiorLen,
                 earlyAbortThreshold: threshold
-            ) <= threshold {
+            )
+            verifiedRows += score.rowsChecked
+            if score.mad <= threshold {
                 return true
             }
         }
         return false
     }
 
-    // Exact 2-stage MAD with mathematical lower-bound pruning:
-    // Stage 1 accumulates the row lower bound across all `length` rows (`rowLB <= exactL1`).
-    // If `rowLB > maxAllowedTotal`, `exactL1` is guaranteed to exceed `maxAllowedTotal`, so we abort in ~6 integer ops/row!
-    // Stage 2 checks a 16-row strided sample first (substituting `exact - lb` into `runningLowerBound` so it remains an
-    // exact mathematical lower bound!) before scanning the remaining rows, aborting the instant `runningLowerBound > maxAllowedTotal`.
     private static func exactMeanAbsoluteDifference(
         accumulatedRows: [RowSignature],
         accStart: Int,
@@ -838,49 +845,75 @@ struct ScrollingImageStitcher {
         length: Int,
         earlyAbortThreshold: Double
     ) -> Double {
-        guard length > 0 else { return .greatestFiniteMagnitude }
+        exactMeanAbsoluteDifferenceWithRowCount(
+            accumulatedRows: accumulatedRows,
+            accStart: accStart,
+            nextRows: nextRows,
+            nextStart: nextStart,
+            length: length,
+            earlyAbortThreshold: earlyAbortThreshold
+        ).mad
+    }
+
+    // Exact 2-stage MAD with mathematical lower-bound pruning:
+    // Stage 1 accumulates the row lower bound across all `length` rows (`rowLB <= exactL1`).
+    // If `rowLB > maxAllowedTotal`, `exactL1` is guaranteed to exceed `maxAllowedTotal`, so we abort in ~6 integer ops/row!
+    // Stage 2 checks a 16-row strided sample first (substituting `exact - lb` into `runningLowerBound` so it remains an
+    // exact mathematical lower bound!) before scanning the remaining rows, aborting the instant `runningLowerBound > maxAllowedTotal`.
+    private static func exactMeanAbsoluteDifferenceWithRowCount(
+        accumulatedRows: [RowSignature],
+        accStart: Int,
+        nextRows: [RowSignature],
+        nextStart: Int,
+        length: Int,
+        earlyAbortThreshold: Double
+    ) -> (mad: Double, rowsChecked: Int) {
+        guard length > 0 else { return (.greatestFiniteMagnitude, 0) }
         let samplesPerRow = sampleColumns * 3
         let maxAllowedTotal = Int((earlyAbortThreshold * Double(length * samplesPerRow)).rounded(.up))
+        var rowsChecked = 0
 
         if length >= 16 {
             let a0 = 0
             let a1 = length / 3
             let a2 = (length * 2) / 3
             let a3 = length - 1
+            rowsChecked += 4
             let probeLB = rowLowerBound(accumulatedRows[accStart + a0], nextRows[nextStart + a0])
                 + rowLowerBound(accumulatedRows[accStart + a1], nextRows[nextStart + a1])
                 + rowLowerBound(accumulatedRows[accStart + a2], nextRows[nextStart + a2])
                 + rowLowerBound(accumulatedRows[accStart + a3], nextRows[nextStart + a3])
             if probeLB > maxAllowedTotal {
-                return .greatestFiniteMagnitude
+                return (.greatestFiniteMagnitude, rowsChecked)
             }
             if probeLB == 0 {
                 // Balanced/constant row sums (`rowLowerBound == 0`): skip scanning `rowLowerBound` and accumulate
                 // exact `rowL1Diff` directly in strided order, aborting only when `exactTotalDiff > maxAllowedTotal`
                 // (a strict mathematical lower bound on the full-window MAD).
                 var exactTotalDiff = rowL1Diff(accumulatedRows[accStart + a0], nextRows[nextStart + a0])
-                if exactTotalDiff > maxAllowedTotal { return .greatestFiniteMagnitude }
+                if exactTotalDiff > maxAllowedTotal { return (.greatestFiniteMagnitude, rowsChecked) }
                 exactTotalDiff += rowL1Diff(accumulatedRows[accStart + a1], nextRows[nextStart + a1])
-                if exactTotalDiff > maxAllowedTotal { return .greatestFiniteMagnitude }
+                if exactTotalDiff > maxAllowedTotal { return (.greatestFiniteMagnitude, rowsChecked) }
                 exactTotalDiff += rowL1Diff(accumulatedRows[accStart + a2], nextRows[nextStart + a2])
-                if exactTotalDiff > maxAllowedTotal { return .greatestFiniteMagnitude }
+                if exactTotalDiff > maxAllowedTotal { return (.greatestFiniteMagnitude, rowsChecked) }
                 exactTotalDiff += rowL1Diff(accumulatedRows[accStart + a3], nextRows[nextStart + a3])
-                if exactTotalDiff > maxAllowedTotal { return .greatestFiniteMagnitude }
+                if exactTotalDiff > maxAllowedTotal { return (.greatestFiniteMagnitude, rowsChecked) }
 
                 let stride = max(2, min(16, length / 16))
                 for rem in 0..<stride {
                     var sdy = rem
                     while sdy < length {
                         if sdy != a0 && sdy != a1 && sdy != a2 && sdy != a3 {
+                            rowsChecked += 1
                             exactTotalDiff += rowL1Diff(accumulatedRows[accStart + sdy], nextRows[nextStart + sdy])
                             if exactTotalDiff > maxAllowedTotal {
-                                return .greatestFiniteMagnitude
+                                return (.greatestFiniteMagnitude, rowsChecked)
                             }
                         }
                         sdy += stride
                     }
                 }
-                return Double(exactTotalDiff) / Double(length * samplesPerRow)
+                return (Double(exactTotalDiff) / Double(length * samplesPerRow), rowsChecked)
             }
         }
 
@@ -889,9 +922,10 @@ struct ScrollingImageStitcher {
             let lbStride = 4
             var dy = 0
             while dy < length {
+                rowsChecked += 1
                 runningLowerBound += rowLowerBound(accumulatedRows[accStart + dy], nextRows[nextStart + dy])
                 if runningLowerBound > maxAllowedTotal {
-                    return .greatestFiniteMagnitude
+                    return (.greatestFiniteMagnitude, rowsChecked)
                 }
                 dy += lbStride
             }
@@ -899,9 +933,10 @@ struct ScrollingImageStitcher {
                 for rem in 1..<lbStride {
                     var rdy = rem
                     while rdy < length {
+                        rowsChecked += 1
                         runningLowerBound += rowLowerBound(accumulatedRows[accStart + rdy], nextRows[nextStart + rdy])
                         if runningLowerBound > maxAllowedTotal {
-                            return .greatestFiniteMagnitude
+                            return (.greatestFiniteMagnitude, rowsChecked)
                         }
                         rdy += lbStride
                     }
@@ -912,20 +947,22 @@ struct ScrollingImageStitcher {
                 for rem in 0..<stride {
                     var sdy = rem
                     while sdy < length {
+                        rowsChecked += 1
                         exactTotalDiff += rowL1Diff(accumulatedRows[accStart + sdy], nextRows[nextStart + sdy])
                         if exactTotalDiff > maxAllowedTotal {
-                            return .greatestFiniteMagnitude
+                            return (.greatestFiniteMagnitude, rowsChecked)
                         }
                         sdy += stride
                     }
                 }
-                return Double(exactTotalDiff) / Double(length * samplesPerRow)
+                return (Double(exactTotalDiff) / Double(length * samplesPerRow), rowsChecked)
             }
         } else {
             for dy in 0..<length {
+                rowsChecked += 1
                 runningLowerBound += rowLowerBound(accumulatedRows[accStart + dy], nextRows[nextStart + dy])
                 if runningLowerBound > maxAllowedTotal {
-                    return .greatestFiniteMagnitude
+                    return (.greatestFiniteMagnitude, rowsChecked)
                 }
             }
         }
@@ -936,6 +973,7 @@ struct ScrollingImageStitcher {
             for rem in 0..<stride {
                 var dy = rem
                 while dy < length {
+                    rowsChecked += 1
                     let a = accumulatedRows[accStart + dy]
                     let b = nextRows[nextStart + dy]
                     let lb = rowLowerBound(a, b)
@@ -943,13 +981,14 @@ struct ScrollingImageStitcher {
                     exactTotalDiff += exact
                     runningLowerBound += (exact - lb)
                     if runningLowerBound > maxAllowedTotal {
-                        return .greatestFiniteMagnitude
+                        return (.greatestFiniteMagnitude, rowsChecked)
                     }
                     dy += stride
                 }
             }
         } else {
             for dy in 0..<length {
+                rowsChecked += 1
                 let a = accumulatedRows[accStart + dy]
                 let b = nextRows[nextStart + dy]
                 let lb = rowLowerBound(a, b)
@@ -957,11 +996,11 @@ struct ScrollingImageStitcher {
                 exactTotalDiff += exact
                 runningLowerBound += (exact - lb)
                 if runningLowerBound > maxAllowedTotal {
-                    return .greatestFiniteMagnitude
+                    return (.greatestFiniteMagnitude, rowsChecked)
                 }
             }
         }
-        return Double(exactTotalDiff) / Double(length * samplesPerRow)
+        return (Double(exactTotalDiff) / Double(length * samplesPerRow), rowsChecked)
     }
 
     private static func overlapHasPeriodicSelfMatch(
@@ -1058,6 +1097,7 @@ final class ScrollingCaptureSessionController: ObservableObject {
     private var pendingSampleRequested = false
     private var pendingFinalFlushRequested = false
     private var captureTask: Task<Void, Never>?
+    private var matchingTask: Task<(ScrollingImageStitcher, ScrollingStitchResult), Never>?
 
     init(
         initialSelection: CaptureSelectionResult,
@@ -1263,14 +1303,17 @@ final class ScrollingCaptureSessionController: ObservableObject {
                 let hint = Self.resolveDirectionHint(scrollDeltaSnapshot: scrollDeltaSnapshot, now: now) ?? .unknown
                 let stitcherSnapshot = stitcher
                 // Run exact row matching off the MainActor so large low-contrast frames never stall UI/Esc handling.
-                let (updatedStitcher, res) = await Task.detached(priority: .userInitiated) {
+                let worker = Task.detached(priority: .userInitiated) {
                     var copy = stitcherSnapshot
                     var r = copy.appendFrame(nextCG, directionHint: hint)
-                    if r == .skippedNoOverlap && hint != .unknown {
+                    if r == .skippedNoOverlap && hint != .unknown && !Task.isCancelled {
                         r = copy.appendFrame(nextCG, directionHint: .unknown)
                     }
                     return (copy, r)
-                }.value
+                }
+                matchingTask = worker
+                let (updatedStitcher, res) = await worker.value
+                matchingTask = nil
                 guard !isFinished, !Task.isCancelled else { break }
                 lastSampleFailed = false
                 stitcher = updatedStitcher
@@ -1326,6 +1369,8 @@ final class ScrollingCaptureSessionController: ObservableObject {
         isFinished = true
         pendingSampleRequested = false
         pendingFinalFlushRequested = false
+        matchingTask?.cancel()
+        matchingTask = nil
         captureTask?.cancel()
         captureTask = nil
         teardownMonitorsAndPanels()

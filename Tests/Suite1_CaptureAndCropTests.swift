@@ -243,6 +243,30 @@ private func runAsyncScrollingCaptureTests(
         "Cancelling an in-flight async sample suppresses late stitching and callback resurrection"
     )
 
+    let bgCancelGate = AsyncScrollingCaptureGate()
+    let bgCancelledSession = ScrollingCaptureSessionController(
+        initialSelection: selection,
+        initialCropCGImage: frame0,
+        asyncCaptureRegionProvider: { rect in await bgCancelGate.capture(rect) }
+    )
+    var bgCancelCallbacks = 0
+    var bgCancelResult: CaptureSelectionResult? = selection
+    bgCancelledSession.start { result in
+        bgCancelCallbacks += 1
+        bgCancelResult = result
+    }
+    _ = bgCancelledSession.sampleNextFrameIfChanged()
+    await bgCancelGate.waitForRequest(1)
+    bgCancelGate.resolveRequest(0, with: frame1)
+    // Yield once so drainSamples receives frame1 and enters the detached matching worker, then cancel immediately.
+    await Task.yield()
+    bgCancelledSession.cancelCapture()
+    await Task.yield()
+    t.check(
+        bgCancelCallbacks == 1 && bgCancelResult == nil && !bgCancelledSession.isActive && bgCancelledSession.pointHeight == 80,
+        "Cancelling while detached matching is active completes once with nil and suppresses late stitch results"
+    )
+
     let failedFinalGate = AsyncScrollingCaptureGate()
     let failedFinalSession = ScrollingCaptureSessionController(
         initialSelection: selection,
@@ -1376,11 +1400,16 @@ func runSuite1CaptureAndCropTests(_ t: TestHarness, testPasteboard: NSPasteboard
                 var balState: UInt64 = 0xA5A5_5A5A_1234_5678
                 func makeBalancedReplayImage(_ rows: [[UInt8]]) -> CGImage? {
                     let w = 64, h = rows.count
+                    let xStart = Int((Double(w) * ScrollingImageStitcher.horizontalMarginTrimRatio).rounded())
+                    let xEnd = min(w - 1, Int((Double(w) * (1.0 - ScrollingImageStitcher.horizontalMarginTrimRatio)).rounded()))
+                    let span = max(1, xEnd - xStart)
+                    let cols = (0..<32).map { min(w - 1, max(0, xStart + ($0 * span) / 31)) }
                     var buf = [UInt8](repeating: 128, count: w * h * 4)
                     for y in 0..<h {
                         for x in 0..<w {
                             let idx = (y * w + x) * 4
-                            let cBase = min(31, max(0, (x - 6) * 31 / 52)) * 3
+                            let cIdx = cols.enumerated().min(by: { abs($0.element - x) < abs($1.element - x) })?.offset ?? 0
+                            let cBase = cIdx * 3
                             buf[idx] = rows[y][cBase]
                             buf[idx + 1] = rows[y][cBase + 1]
                             buf[idx + 2] = rows[y][cBase + 2]
@@ -1446,6 +1475,7 @@ func runSuite1CaptureAndCropTests(_ t: TestHarness, testPasteboard: NSPasteboard
                     perturbBalancedRow(&balScroll32[bal360Trim + a], delta: 8)
                 }
                 var balAnchorMatched = false
+                var balLongProbesBalanced = false
                 if let b0Img = makeBalancedReplayImage(balScroll0),
                    let b32Img = makeBalancedReplayImage(balScroll32) {
                     var bStitcher = ScrollingImageStitcher(initialFrame: b0Img, scaleFactor: 2.0)
@@ -1469,12 +1499,19 @@ func runSuite1CaptureAndCropTests(_ t: TestHarness, testPasteboard: NSPasteboard
                 var balLong48 = Array(balLongDoc[48..<1448])
                 let longTrim = Int((1400.0 * ScrollingImageStitcher.stickyHeaderTrimRatio).rounded()) // 112
                 let longOverlap = 1400 - longTrim - longTrim - 48 // 1128 >= 1024
-                for a in [0, longOverlap / 3, (longOverlap * 2) / 3, longOverlap - 1, 16, 32, 48, 64] {
+                let longNoisyOffsets = [0, longOverlap / 3, (longOverlap * 2) / 3, longOverlap - 1, 16, 32, 48, 64]
+                for a in longNoisyOffsets {
                     perturbBalancedRow(&balLong48[longTrim + a], delta: 20)
                 }
                 var balLongMatched = false
                 if let bl0 = makeBalancedReplayImage(balLong0),
                    let bl48 = makeBalancedReplayImage(balLong48) {
+                    let sig0 = ScrollingImageStitcher.extractRowSignatures(from: bl0)
+                    let sig48 = ScrollingImageStitcher.extractRowSignatures(from: bl48)
+                    balLongProbesBalanced = longNoisyOffsets.allSatisfy { dy in
+                        sig0[longTrim + 48 + dy].bandSums == sig48[longTrim + dy].bandSums &&
+                        sig0[longTrim + 48 + dy].rgbSums == sig48[longTrim + dy].rgbSums
+                    }
                     var blStitcher = ScrollingImageStitcher(initialFrame: bl0, scaleFactor: 1.0)
                     balLongMatched = (blStitcher.appendFrame(bl48, directionHint: .downward) == .appended(addedPixels: 48, totalPixelHeight: 1448))
                 }
@@ -1492,10 +1529,48 @@ func runSuite1CaptureAndCropTests(_ t: TestHarness, testPasteboard: NSPasteboard
                     balNineProbeReplayMatched = (brStitcher.appendFrame(blVp) == .unchanged)
                 }
 
+                // 4) 19,000-row balanced-RGB strip with 65 lower-scored periodic decoys (probeDiff 9,216) ranked ahead of
+                // a genuine replay (probeDiff 15,360, full MAD 0.272 <= 6.0)
+                var sixtyFiveDecoyDoc = Array(balLongDoc[0..<2200])
+                while sixtyFiveDecoyDoc.count < 19_000 {
+                    let y = sixtyFiveDecoyDoc.count
+                    var s = UInt64(y + 1) &* 0x9E3779B97F4A7C15
+                    var r = [UInt8](repeating: 128, count: 96)
+                    for p in 0..<16 {
+                        s = (s ^ (s >> 30)) &* 0xBF58476D1CE4E5B9
+                        for c in 0..<3 {
+                            let v: UInt8 = ((s >> c) & 1) == 0 ? 1 : 255
+                            r[(p * 2) * 3 + c] = v
+                            r[(p * 2 + 1) * 3 + c] = UInt8(256 - Int(v))
+                        }
+                    }
+                    sixtyFiveDecoyDoc.append(r)
+                }
+                var sixtyFiveViewport = Array(sixtyFiveDecoyDoc[18_000..<18_700])
+                let sfTrim = Int((700.0 * ScrollingImageStitcher.stickyHeaderTrimRatio).rounded()) // 56
+                let sfInterior = 700 - sfTrim - sfTrim // 588
+                let sfProbes = (0..<12).map { ($0 * (sfInterior - 1)) / 11 }
+                for (i, dy) in sfProbes.enumerated() where i < 5 {
+                    perturbBalancedRow(&sixtyFiveViewport[sfTrim + dy], delta: 32) // 5 * 3,072 = 15,360; full MAD = 0.272
+                }
+                for d in 0..<65 {
+                    let offset = sfTrim + d * 251
+                    for dy in sfProbes {
+                        sixtyFiveDecoyDoc[offset + dy] = sixtyFiveViewport[sfTrim + dy]
+                        perturbBalancedRow(&sixtyFiveDecoyDoc[offset + dy], delta: 8) // 12 * 768 = 9,216 < 15,360
+                    }
+                }
+                var sixtyFiveDecoyReplayMatched = false
+                if let sfAcc = makeBalancedReplayImage(sixtyFiveDecoyDoc),
+                   let sfVp = makeBalancedReplayImage(sixtyFiveViewport) {
+                    var sfStitcher = ScrollingImageStitcher(initialFrame: sfAcc, scaleFactor: 1.0)
+                    sixtyFiveDecoyReplayMatched = (sfStitcher.appendFrame(sfVp) == .unchanged)
+                }
+
                 t.check(
-                    decoyRes == .unchanged && balReplayMatched && balAnchorMatched && balLongMatched && balNineProbeReplayMatched,
-                    "ScrollingImageStitcher replay & directional matching find genuine matches past 40 decoys, 9 noisy balanced probe rows, exact 4-anchor noise (29/119/209/298), and 8 noisy rows on >=1024px overlap",
-                    detail: "decoyRes=\(decoyRes), balReplayMatched=\(balReplayMatched), balAnchorMatched=\(balAnchorMatched), balLongMatched=\(balLongMatched), balNineProbeReplayMatched=\(balNineProbeReplayMatched)"
+                    decoyRes == .unchanged && balReplayMatched && balAnchorMatched && balLongProbesBalanced && balLongMatched && balNineProbeReplayMatched && sixtyFiveDecoyReplayMatched,
+                    "ScrollingImageStitcher replay & directional matching find genuine matches past 40/65 decoys, 9 noisy balanced probe rows, exact 4-anchor noise (29/119/209/298), and 8 balanced-sum noisy rows on >=1024px overlap",
+                    detail: "decoyRes=\(decoyRes), balReplayMatched=\(balReplayMatched), balAnchorMatched=\(balAnchorMatched), balLongProbesBalanced=\(balLongProbesBalanced), balLongMatched=\(balLongMatched), balNineProbeReplayMatched=\(balNineProbeReplayMatched), sixtyFiveDecoyReplayMatched=\(sixtyFiveDecoyReplayMatched)"
                 )
             } else {
                 t.check(false, "Created 40 non-overlapping decoy replay frames")
