@@ -105,6 +105,7 @@ struct ScrollingImageStitcher {
         let cachedSameFrame = lastEvaluatedDirectionalPair.map { Self.signaturesExactlyEqual($0.rows, nextRows) } ?? false
 
         if !cachedSameFrame {
+            if Task.isCancelled { return .skippedNoOverlap }
             // 1. Fast check for zero scroll (identical interior content at the bottom of the accumulated strip, verified on every interior row)
             let interiorCompareLen = max(0, compareH - topMargin - bottomMargin)
             let zeroShiftError = Self.exactMeanAbsoluteDifference(
@@ -115,19 +116,27 @@ struct ScrollingImageStitcher {
                 length: interiorCompareLen,
                 earlyAbortThreshold: 1.8
             )
+            if Task.isCancelled { return .skippedNoOverlap }
             if zeroShiftError < 1.8 {
                 return cacheTerminalResult(.unchanged, directionHint: directionHint, for: nextRows)
             }
 
             // 2. Check if this viewport was already captured earlier in the accumulated image
             // (handles scrolling up and scrolling back down through already-stitched content without duplicates)
-            if Self.isInteriorAlreadyCaptured(
+            switch Self.isInteriorAlreadyCaptured(
                 accumulatedRows: accumulatedRowSignatures,
                 nextRows: nextRows,
                 topMargin: topMargin,
                 bottomMargin: bottomMargin
             ) {
+            case .matched:
                 return cacheTerminalResult(.unchanged, directionHint: directionHint, for: nextRows)
+            case .budgetExhausted:
+                return cacheTerminalResult(.skippedNoOverlap, directionHint: directionHint, for: nextRows)
+            case .cancelled:
+                return .skippedNoOverlap
+            case .notMatched:
+                break
             }
         }
 
@@ -164,6 +173,7 @@ struct ScrollingImageStitcher {
                 maxShift: maxShift,
                 minOverlapRows: minOverlapRows
             )
+            if Task.isCancelled { return .skippedNoOverlap }
             let upCandidates = Self.collectDirectionalCandidates(
                 accumulatedRows: accumulatedRowSignatures,
                 nextRows: nextRows,
@@ -176,16 +186,19 @@ struct ScrollingImageStitcher {
                 maxShift: maxShift,
                 minOverlapRows: minOverlapRows
             )
+            if Task.isCancelled { return .skippedNoOverlap }
             downEval = Self.evaluateDirectionalMatch(
                 candidates: downCandidates,
                 rowsForPeriodicCheck: nextRows,
                 minShift: minShift
             )
+            if Task.isCancelled { return .skippedNoOverlap }
             upEval = Self.evaluateDirectionalMatch(
                 candidates: upCandidates,
                 rowsForPeriodicCheck: accumulatedRowSignatures,
                 minShift: minShift
             )
+            if Task.isCancelled { return .skippedNoOverlap }
             hasDownCandidates = !downCandidates.isEmpty
             hasUpCandidates = !upCandidates.isEmpty
             lastEvaluatedDirectionalPair = (
@@ -502,7 +515,7 @@ struct ScrollingImageStitcher {
         maxShift: Int,
         minOverlapRows: Int
     ) -> [DirectionalCandidate] {
-        guard minShift <= maxShift else { return [] }
+        guard minShift <= maxShift, !Task.isCancelled else { return [] }
         var candidates: [DirectionalCandidate] = []
         let detailSourceRows = isDownward ? nextRows : accumulatedRows
         var bestScoreSoFar = 11.5
@@ -526,7 +539,7 @@ struct ScrollingImageStitcher {
 
             for s in minShift...maxShift {
             if Task.isCancelled {
-                return candidates
+                return []
             }
             let overlapStart = topMargin
             let overlapEnd = compareH - bottomMargin - s
@@ -727,18 +740,25 @@ struct ScrollingImageStitcher {
         return rows
     }
 
+    private enum ReplayLookupResult {
+        case matched
+        case notMatched
+        case budgetExhausted
+        case cancelled
+    }
+
     private static func isInteriorAlreadyCaptured(
         accumulatedRows: [RowSignature],
         nextRows: [RowSignature],
         topMargin: Int,
         bottomMargin: Int
-    ) -> Bool {
+    ) -> ReplayLookupResult {
         let interiorLen = nextRows.count - topMargin - bottomMargin
         guard interiorLen >= 12, accumulatedRows.count >= interiorLen + topMargin + bottomMargin else {
-            return false
+            return .notMatched
         }
         let maxOffset = accumulatedRows.count - bottomMargin - interiorLen
-        guard maxOffset >= topMargin else { return false }
+        guard maxOffset >= topMargin else { return .notMatched }
 
         let threshold = 6.0
         let samplesPerRow = sampleColumns * 3
@@ -782,6 +802,9 @@ struct ScrollingImageStitcher {
 
         var candidates: [(offset: Int, probeDiff: Int)] = []
         for offset in topMargin...maxOffset {
+            if (offset & 0x3FF) == 0 && Task.isCancelled {
+                return .cancelled
+            }
             let accWindowSum = accPrefixSum[offset + interiorLen] - accPrefixSum[offset]
             let windowSumDiff = abs(accWindowSum - nextInteriorSum)
             if windowSumDiff > maxAllowedTotal {
@@ -810,16 +833,21 @@ struct ScrollingImageStitcher {
                 candidates.append((offset: offset, probeDiff: probeDiff))
             }
         }
-        guard !candidates.isEmpty else { return false }
+        guard !candidates.isEmpty else { return .notMatched }
         candidates.sort { $0.probeDiff < $1.probeDiff }
 
         // Check candidates in ascending `probeDiff` order, capping total row comparisons (not candidate count)
         // so decoys that fail early only consume a few rows while genuine replays past 64+ decoys are still reached.
+        // If the verification budget is exhausted without a match, fail closed (`.budgetExhausted`) rather than
+        // claiming `.notMatched` so unverified replays cannot turn into duplicate directional appends.
         let maxVerificationRows = max(interiorLen * 64, 65_536)
         var verifiedRows = 0
-        for cand in candidates {
-            if verifiedRows >= maxVerificationRows || Task.isCancelled {
-                break
+        for (idx, cand) in candidates.enumerated() {
+            if Task.isCancelled {
+                return .cancelled
+            }
+            if idx >= 64 && verifiedRows >= maxVerificationRows {
+                return .budgetExhausted
             }
             let score = exactMeanAbsoluteDifferenceWithRowCount(
                 accumulatedRows: accumulatedRows,
@@ -829,12 +857,15 @@ struct ScrollingImageStitcher {
                 length: interiorLen,
                 earlyAbortThreshold: threshold
             )
+            if Task.isCancelled {
+                return .cancelled
+            }
             verifiedRows += score.rowsChecked
             if score.mad <= threshold {
-                return true
+                return .matched
             }
         }
-        return false
+        return .notMatched
     }
 
     private static func exactMeanAbsoluteDifference(
@@ -901,6 +932,7 @@ struct ScrollingImageStitcher {
 
                 let stride = max(2, min(16, length / 16))
                 for rem in 0..<stride {
+                    if Task.isCancelled { return (.greatestFiniteMagnitude, rowsChecked) }
                     var sdy = rem
                     while sdy < length {
                         if sdy != a0 && sdy != a1 && sdy != a2 && sdy != a3 {
@@ -931,6 +963,7 @@ struct ScrollingImageStitcher {
             }
             if runningLowerBound * 16 >= maxAllowedTotal {
                 for rem in 1..<lbStride {
+                    if Task.isCancelled { return (.greatestFiniteMagnitude, rowsChecked) }
                     var rdy = rem
                     while rdy < length {
                         rowsChecked += 1
@@ -945,6 +978,7 @@ struct ScrollingImageStitcher {
                 var exactTotalDiff = 0
                 let stride = max(2, min(16, length / 16))
                 for rem in 0..<stride {
+                    if Task.isCancelled { return (.greatestFiniteMagnitude, rowsChecked) }
                     var sdy = rem
                     while sdy < length {
                         rowsChecked += 1
@@ -971,6 +1005,7 @@ struct ScrollingImageStitcher {
         if length >= 32 {
             let stride = max(2, min(16, length / 16))
             for rem in 0..<stride {
+                if Task.isCancelled { return (.greatestFiniteMagnitude, rowsChecked) }
                 var dy = rem
                 while dy < length {
                     rowsChecked += 1
@@ -1014,6 +1049,7 @@ struct ScrollingImageStitcher {
         let maxPeriod = len / 2
         guard maxPeriod >= minPeriod else { return false }
         for period in minPeriod...maxPeriod {
+            if Task.isCancelled { return false }
             let subLen = len - period
             guard subLen >= 12 else { continue }
             if exactMeanAbsoluteDifference(
@@ -1098,6 +1134,8 @@ final class ScrollingCaptureSessionController: ObservableObject {
     private var pendingFinalFlushRequested = false
     private var captureTask: Task<Void, Never>?
     private var matchingTask: Task<(ScrollingImageStitcher, ScrollingStitchResult), Never>?
+    var onMatchingStartedForTesting: (() -> Void)?
+    var onMatchingFinishedForTesting: ((Bool) -> Void)?
 
     init(
         initialSelection: CaptureSelectionResult,
@@ -1302,13 +1340,17 @@ final class ScrollingCaptureSessionController: ObservableObject {
                 let now = CFAbsoluteTimeGetCurrent()
                 let hint = Self.resolveDirectionHint(scrollDeltaSnapshot: scrollDeltaSnapshot, now: now) ?? .unknown
                 let stitcherSnapshot = stitcher
+                let onMatchingStarted = onMatchingStartedForTesting
+                let onMatchingFinished = onMatchingFinishedForTesting
                 // Run exact row matching off the MainActor so large low-contrast frames never stall UI/Esc handling.
                 let worker = Task.detached(priority: .userInitiated) {
+                    onMatchingStarted?()
                     var copy = stitcherSnapshot
                     var r = copy.appendFrame(nextCG, directionHint: hint)
                     if r == .skippedNoOverlap && hint != .unknown && !Task.isCancelled {
                         r = copy.appendFrame(nextCG, directionHint: .unknown)
                     }
+                    onMatchingFinished?(Task.isCancelled)
                     return (copy, r)
                 }
                 matchingTask = worker
