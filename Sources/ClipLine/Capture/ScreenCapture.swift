@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import Darwin
 import Foundation
+import ScreenCaptureKit
 import SwiftUI
 
 // MARK: - Zero-Flicker In-Memory Screen Capture & Region Selector
@@ -9,17 +10,134 @@ import SwiftUI
 @MainActor
 final class ScreenCaptureOverlayController {
     private(set) var overlayWindows: [NSPanel] = []
+    private(set) var activeScrollingSession: ScrollingCaptureSessionController?
     private var completion: ((CaptureSelectionResult?) -> Void)?
     private var isCursorHidden = false
+    private var pendingScrollingCaptureTask: Task<Void, Never>?
+    private var pendingScrollingEscapeGlobalMonitor: Any?
+    private var pendingScrollingEscapeLocalMonitor: Any?
+    private var pendingScrollingCancelPanel: NSPanel?
+    private var scrollingCaptureGeneration: UInt64 = 0
+    var globalKeyMonitorInstaller: ((@escaping (NSEvent) -> Void) -> Any?) = { handler in
+        NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: handler)
+    }
+    var localKeyMonitorInstaller: ((@escaping (NSEvent) -> NSEvent?) -> Any?) = { handler in
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: handler)
+    }
+    var keyMonitorRemover: (Any) -> Void = { monitor in
+        NSEvent.removeMonitor(monitor)
+    }
     var preflightAccess: () -> Bool = { ScreenCaptureOverlayController.hasLiveScreenCaptureAccess() }
     var requestAccess: () -> Bool = { CGRequestScreenCaptureAccess() }
     var presentPermissionAlert: () -> Void = { ScreenCaptureOverlayController.presentScreenRecordingPermissionAlertIfNeeded() }
+    var liveRegionCaptureProvider: ((NSRect) -> CGImage?)? = nil
+    var scrollingRegionCaptureProvider: ((NSRect) async -> CGImage?)? = nil
 
     private static let cgDisplayCreateImageFn: (@convention(c) (CGDirectDisplayID) -> Unmanaged<CGImage>?)? = {
         guard let handle = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_LAZY),
               let sym = dlsym(handle, "CGDisplayCreateImage") else { return nil }
         return unsafeBitCast(sym, to: (@convention(c) (CGDirectDisplayID) -> Unmanaged<CGImage>?).self)
     }()
+
+    nonisolated static func scrollingCaptureGeometry(
+        screenRect: NSRect,
+        screenFrame: NSRect,
+        pointPixelScale: CGFloat
+    ) -> (sourceRect: CGRect, pixelWidth: Int, pixelHeight: Int)? {
+        guard screenFrame.contains(screenRect),
+              screenRect.width > 0,
+              screenRect.height > 0,
+              pointPixelScale.isFinite,
+              pointPixelScale > 0 else {
+            return nil
+        }
+        let pixelWidth = screenRect.width * pointPixelScale
+        let pixelHeight = screenRect.height * pointPixelScale
+        guard pixelWidth.isFinite,
+              pixelHeight.isFinite,
+              pixelWidth >= 0.5,
+              pixelHeight >= 0.5,
+              pixelWidth < CGFloat(Int.max),
+              pixelHeight < CGFloat(Int.max) else {
+            return nil
+        }
+        let sourceRect = CGRect(
+            x: screenRect.minX - screenFrame.minX,
+            y: screenFrame.maxY - screenRect.maxY,
+            width: screenRect.width,
+            height: screenRect.height
+        )
+        return (
+            sourceRect: sourceRect,
+            pixelWidth: Int(pixelWidth.rounded()),
+            pixelHeight: Int(pixelHeight.rounded())
+        )
+    }
+
+    nonisolated static func shouldAllowOwnExclusionFilter(
+        ownApplicationCount: Int,
+        ownWindowCount: Int
+    ) -> Bool {
+        !(ownApplicationCount == 0 && ownWindowCount > 0)
+    }
+
+    func captureScrollingScreenRectImage(_ screenRect: NSRect) async -> CGImage? {
+        if let scrollingRegionCaptureProvider {
+            return await scrollingRegionCaptureProvider(screenRect)
+        }
+        if let liveRegionCaptureProvider {
+            return liveRegionCaptureProvider(screenRect)
+        }
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(screenRect) }),
+              let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
+            return nil
+        }
+
+        do {
+            let shareableContent = try await SCShareableContent.excludingDesktopWindows(
+                false,
+                onScreenWindowsOnly: false
+            )
+            guard let display = shareableContent.displays.first(where: { $0.displayID == displayID }) else {
+                return nil
+            }
+
+            let ownPID = ProcessInfo.processInfo.processIdentifier
+            let ownApplications = shareableContent.applications.filter { $0.processID == ownPID }
+            let ownWindows = shareableContent.windows.filter { $0.owningApplication?.processID == ownPID }
+            guard Self.shouldAllowOwnExclusionFilter(
+                ownApplicationCount: ownApplications.count,
+                ownWindowCount: ownWindows.count
+            ) else {
+                return nil
+            }
+
+            let contentFilter = SCContentFilter(
+                display: display,
+                excludingApplications: ownApplications,
+                exceptingWindows: []
+            )
+            guard let geometry = Self.scrollingCaptureGeometry(
+                screenRect: screenRect,
+                screenFrame: screen.frame,
+                pointPixelScale: CGFloat(contentFilter.pointPixelScale)
+            ) else {
+                return nil
+            }
+
+            let configuration = SCStreamConfiguration()
+            configuration.width = geometry.pixelWidth
+            configuration.height = geometry.pixelHeight
+            configuration.sourceRect = geometry.sourceRect
+            configuration.showsCursor = false
+            return try await SCScreenshotManager.captureImage(
+                contentFilter: contentFilter,
+                configuration: configuration
+            )
+        } catch {
+            return nil
+        }
+    }
 
     nonisolated static func canReadWindowNamesFromWindowList(
         _ windowList: [[String: Any]],
@@ -99,7 +217,7 @@ final class ScreenCaptureOverlayController {
         return cg
     }
 
-    func beginCapture(completion: @escaping (CaptureSelectionResult?) -> Void) {
+    func beginCapture(preferScrollingCapture: Bool = false, completion: @escaping (CaptureSelectionResult?) -> Void) {
         guard ensureScreenCaptureAccess(showAlertOnDenial: true) else {
             DiagnosticsService.recordEvent(category: "permission_denied", message: "beginCapture blocked by screen capture access check")
             completion(nil)
@@ -142,6 +260,7 @@ final class ScreenCaptureOverlayController {
             descriptors: descriptors,
             crosshairConfig: crosshairConfig,
             hideSystemCursor: true,
+            preferScrollingCapture: preferScrollingCapture,
             completion: completion
         )
     }
@@ -150,6 +269,7 @@ final class ScreenCaptureOverlayController {
         descriptors: [(screenFrame: NSRect, cgImage: CGImage, candidateWindowRects: [NSRect], isInitialCursorScreen: Bool)],
         crosshairConfig: CrosshairConfiguration = .defaults,
         hideSystemCursor: Bool = false,
+        preferScrollingCapture: Bool = false,
         completion: @escaping (CaptureSelectionResult?) -> Void
     ) {
         guard descriptors.contains(where: { $0.isInitialCursorScreen }) else {
@@ -187,6 +307,7 @@ final class ScreenCaptureOverlayController {
                 candidateWindowRects: desc.candidateWindowRects,
                 crosshairConfig: crosshairConfig,
                 isCursorInsideScreen: desc.isInitialCursorScreen,
+                preferScrollingCapture: preferScrollingCapture,
                 onActivateScreen: { [weak self] activeView in
                     self?.activateOverlayView(activeView)
                 },
@@ -236,27 +357,261 @@ final class ScreenCaptureOverlayController {
         }
     }
 
-    func finish(with result: CaptureSelectionResult?) {
+    @discardableResult
+    func beginDirectScrollingCapture(
+        initialSelection: CaptureSelectionResult,
+        completion: @escaping (CaptureSelectionResult?) -> Void
+    ) -> Task<Void, Never>? {
         if isCursorHidden {
             NSCursor.unhide()
             isCursorHidden = false
         }
         for panel in overlayWindows {
+            panel.sharingType = .none
+            panel.alphaValue = 0
             panel.orderOut(nil)
         }
         overlayWindows.removeAll()
+
+        self.completion = completion
+        if liveRegionCaptureProvider == nil && scrollingRegionCaptureProvider == nil {
+            guard ensureScreenCaptureAccess(showAlertOnDenial: true) else {
+                completeCapture(nil)
+                return nil
+            }
+        }
+
+        return startScrollingCapture(initialSelection: initialSelection)
+    }
+
+    @discardableResult
+    func finish(with result: CaptureSelectionResult?) -> Task<Void, Never>? {
+        if isCursorHidden {
+            NSCursor.unhide()
+            isCursorHidden = false
+        }
+        for panel in overlayWindows {
+            panel.sharingType = .none
+            panel.alphaValue = 0
+            panel.orderOut(nil)
+        }
+        overlayWindows.removeAll()
+
+        if let res = result, res.isScrollingCapture {
+            return startScrollingCapture(initialSelection: res)
+        }
+
+        completeCapture(result)
+        return nil
+    }
+
+    private func removePendingScrollingEscapeMonitor() {
+        if let pendingScrollingEscapeGlobalMonitor {
+            keyMonitorRemover(pendingScrollingEscapeGlobalMonitor)
+            self.pendingScrollingEscapeGlobalMonitor = nil
+        }
+        if let pendingScrollingEscapeLocalMonitor {
+            keyMonitorRemover(pendingScrollingEscapeLocalMonitor)
+            self.pendingScrollingEscapeLocalMonitor = nil
+        }
+        pendingScrollingCancelPanel?.orderOut(nil)
+        pendingScrollingCancelPanel = nil
+    }
+
+    private static func makePendingScrollingCancelButtonPanel(
+        near screenRect: NSRect,
+        onCancel: @escaping () -> Void
+    ) -> NSPanel {
+        let panelW: CGFloat = 104
+        let panelH: CGFloat = 34
+        let screen = NSScreen.screens.first(where: { $0.frame.intersects(screenRect) }) ?? NSScreen.main ?? NSScreen.screens.first
+        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        var x = screenRect.maxX + 14
+        var y = screenRect.midY - panelH / 2
+        if x + panelW > visible.maxX - 8 {
+            x = screenRect.minX - panelW - 14
+        }
+        if x < visible.minX + 8 {
+            x = max(visible.minX + 8, min(visible.maxX - panelW - 8, screenRect.midX - panelW / 2))
+            y = screenRect.minY - panelH - 12
+            if y < visible.minY + 8 {
+                y = min(visible.maxY - panelH - 8, screenRect.maxY + 12)
+            }
+        }
+        y = max(visible.minY + 8, min(visible.maxY - panelH - 8, y))
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: round(x), y: round(y), width: panelW, height: panelH),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isFloatingPanel = true
+        panel.level = .screenSaver
+        panel.sharingType = .none
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.contentView = NSHostingView(
+            rootView: Button(action: onCancel) {
+                Text(L10n.scrollingCaptureCancelButton)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8))
+            }
+            .buttonStyle(.plain)
+        )
+        return panel
+    }
+
+    private func startScrollingCapture(initialSelection: CaptureSelectionResult) -> Task<Void, Never>? {
+        scrollingCaptureGeneration &+= 1
+        let generation = scrollingCaptureGeneration
+        pendingScrollingCaptureTask?.cancel()
+        pendingScrollingCaptureTask = nil
+        removePendingScrollingEscapeMonitor()
+
+        if scrollingRegionCaptureProvider == nil, let liveRegionCaptureProvider {
+            guard let initialCrop = liveRegionCaptureProvider(initialSelection.selectedScreenRect) else {
+                completeCapture(nil)
+                return nil
+            }
+            startScrollingSession(
+                initialSelection: initialSelection,
+                initialCropCGImage: initialCrop,
+                synchronousCaptureProvider: liveRegionCaptureProvider
+            )
+            return nil
+        }
+
+        let handlePendingEscape: (Bool) -> Bool = { [weak self] isBareEscape in
+            guard isBareEscape, let self, self.pendingScrollingCaptureTask != nil else { return false }
+            self.cancelActiveCapture(reason: "escape during pending scrolling seed")
+            return true
+        }
+        pendingScrollingEscapeGlobalMonitor = globalKeyMonitorInstaller { event in
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                .subtracting([.numericPad, .function])
+            let isBareEscape = mods.isEmpty && event.keyCode == 53
+            MainActor.assumeIsolated {
+                _ = handlePendingEscape(isBareEscape)
+            }
+        }
+        pendingScrollingEscapeLocalMonitor = localKeyMonitorInstaller { event in
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                .subtracting([.numericPad, .function])
+            let isBareEscape = mods.isEmpty && event.keyCode == 53
+            let handled = MainActor.assumeIsolated {
+                handlePendingEscape(isBareEscape)
+            }
+            return handled ? nil : event
+        }
+        let cancelPanel = Self.makePendingScrollingCancelButtonPanel(near: initialSelection.selectedScreenRect) { [weak self] in
+            self?.cancelActiveCapture(reason: "cancel button during pending scrolling seed")
+        }
+        cancelPanel.orderFrontRegardless()
+        pendingScrollingCancelPanel = cancelPanel
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let initialCrop = await self.captureScrollingScreenRectImage(initialSelection.selectedScreenRect)
+            guard self.scrollingCaptureGeneration == generation, !Task.isCancelled else { return }
+            self.pendingScrollingCaptureTask = nil
+            self.removePendingScrollingEscapeMonitor()
+            guard let initialCrop else {
+                self.completeCapture(nil)
+                return
+            }
+            self.startScrollingSession(initialSelection: initialSelection, initialCropCGImage: initialCrop)
+        }
+        pendingScrollingCaptureTask = task
+        return task
+    }
+
+    private func startScrollingSession(
+        initialSelection: CaptureSelectionResult,
+        initialCropCGImage: CGImage,
+        synchronousCaptureProvider: ((NSRect) -> CGImage?)? = nil
+    ) {
+        let liveInitialImage = NSImage(
+            cgImage: initialCropCGImage,
+            size: NSSize(
+                width: CGFloat(initialCropCGImage.width) / max(1.0, initialSelection.scaleFactor),
+                height: CGFloat(initialCropCGImage.height) / max(1.0, initialSelection.scaleFactor)
+            )
+        )
+        let selection = CaptureSelectionResult(
+            fullScreenCGImage: initialSelection.fullScreenCGImage,
+            fullScreenFrame: initialSelection.fullScreenFrame,
+            scaleFactor: initialSelection.scaleFactor,
+            selectedScreenRect: initialSelection.selectedScreenRect,
+            croppedImage: liveInitialImage,
+            isScrollingCapture: true
+        )
+        let session: ScrollingCaptureSessionController
+        if let synchronousCaptureProvider {
+            session = ScrollingCaptureSessionController(
+                initialSelection: selection,
+                initialCropCGImage: initialCropCGImage,
+                captureRegionProvider: synchronousCaptureProvider
+            )
+        } else {
+            session = ScrollingCaptureSessionController(
+                initialSelection: selection,
+                initialCropCGImage: initialCropCGImage,
+                asyncCaptureRegionProvider: { [weak self] rect in
+                    guard let self else { return nil }
+                    return await self.captureScrollingScreenRectImage(rect)
+                }
+            )
+        }
+        activeScrollingSession = session
+        session.start { [weak self] finalResult in
+            guard let self else { return }
+            self.activeScrollingSession = nil
+            self.completeCapture(finalResult)
+        }
+    }
+
+    private func completeCapture(_ result: CaptureSelectionResult?) {
+        removePendingScrollingEscapeMonitor()
         let cb = completion
         completion = nil
         cb?(result)
     }
 
+    var isScrollingCapturePending: Bool {
+        pendingScrollingCaptureTask != nil
+    }
+
+    var hasPendingScrollingEscapeMonitors: Bool {
+        pendingScrollingEscapeGlobalMonitor != nil || pendingScrollingEscapeLocalMonitor != nil || pendingScrollingCancelPanel != nil
+    }
+
     var hasActiveOverlays: Bool {
-        completion != nil && overlayWindows.contains(where: { $0.isVisible })
+        completion != nil && (
+            overlayWindows.contains(where: { $0.isVisible }) ||
+            activeScrollingSession?.isActive == true ||
+            pendingScrollingCaptureTask != nil
+        )
     }
 
     func cancelActiveCapture(reason: String) {
-        guard completion != nil || !overlayWindows.isEmpty else { return }
+        guard completion != nil || !overlayWindows.isEmpty || activeScrollingSession != nil || pendingScrollingCaptureTask != nil else { return }
         fputs("[ClipLine] Cancelling active capture session (\(reason))\n", stderr)
+        scrollingCaptureGeneration &+= 1
+        pendingScrollingCaptureTask?.cancel()
+        pendingScrollingCaptureTask = nil
+        removePendingScrollingEscapeMonitor()
+        if let scrolling = activeScrollingSession {
+            activeScrollingSession = nil
+            scrolling.cancelCapture()
+        }
         finish(with: nil)
     }
 
@@ -640,6 +995,7 @@ final class PixPinSelectionView: NSView {
     let candidateWindowRects: [NSRect]
     var crosshairConfig: CrosshairConfiguration
     var isCursorInsideScreen: Bool
+    var preferScrollingCapture: Bool
     private let onActivateScreen: ((PixPinSelectionView) -> Void)?
     var pasteboardProvider: () -> NSPasteboard = { ClotheslineManager.shared.pasteboardProvider() }
     private let onFinish: (CaptureSelectionResult?) -> Void
@@ -658,6 +1014,7 @@ final class PixPinSelectionView: NSView {
         candidateWindowRects: [NSRect] = [],
         crosshairConfig: CrosshairConfiguration = CrosshairConfigurationStore().load(),
         isCursorInsideScreen: Bool = true,
+        preferScrollingCapture: Bool = false,
         onActivateScreen: ((PixPinSelectionView) -> Void)? = nil,
         onFinish: @escaping (CaptureSelectionResult?) -> Void
     ) {
@@ -668,6 +1025,7 @@ final class PixPinSelectionView: NSView {
         self.candidateWindowRects = candidateWindowRects
         self.crosshairConfig = crosshairConfig
         self.isCursorInsideScreen = isCursorInsideScreen
+        self.preferScrollingCapture = preferScrollingCapture
         self.onActivateScreen = onActivateScreen
         self.onFinish = onFinish
         super.init(frame: frame)
@@ -782,7 +1140,7 @@ final class PixPinSelectionView: NSView {
         needsDisplay = true
     }
 
-    private func completeCapture(with rect: NSRect) {
+    private func completeCapture(with rect: NSRect, isScrollingCapture: Bool? = nil) {
         let clippedRect = rect.intersection(bounds)
         if clippedRect.isEmpty || clippedRect.width < 24 || clippedRect.height < 24 {
             startDragPos = nil
@@ -805,7 +1163,8 @@ final class PixPinSelectionView: NSView {
             fullScreenFrame: NSRect(origin: screenOrigin, size: bounds.size),
             scaleFactor: scaleFactor,
             selectedScreenRect: globalRect,
-            croppedImage: cropped
+            croppedImage: cropped,
+            isScrollingCapture: isScrollingCapture ?? preferScrollingCapture
         )
         onFinish(res)
     }
@@ -841,11 +1200,27 @@ final class PixPinSelectionView: NSView {
 
     override func keyDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection([.command, .control, .option])
+        let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
         if event.keyCode == 53 { // Esc
             onFinish(nil)
         } else if !event.isARepeat && (event.keyCode == 49 || (event.keyCode == 0 && event.modifierFlags.contains(.command))) {
             // Space (49) or Cmd+A (0 with .command) captures the entire screen
             completeCapture(with: bounds)
+        } else if !event.isARepeat && (event.keyCode == 37 || chars == "l") && flags.isEmpty {
+            // Press 'L' to start Scrolling Long Capture on the dragged selection or hovered window (or toggle scrolling mode before dragging)
+            if let s = startDragPos, let e = currentDragPos, hypot(e.x - s.x, e.y - s.y) >= 4.0 {
+                let sel = normalizedRect(from: s, to: e).intersection(bounds)
+                if sel.width >= 24 && sel.height >= 24 {
+                    completeCapture(with: sel, isScrollingCapture: true)
+                    return
+                }
+            }
+            if let hoveredWin = hoveredWindowRect(at: mousePos), hoveredWin.width >= 24, hoveredWin.height >= 24 {
+                completeCapture(with: hoveredWin, isScrollingCapture: true)
+                return
+            }
+            preferScrollingCapture.toggle()
+            needsDisplay = true
         } else if !event.isARepeat && event.keyCode == 8 && flags.isEmpty {
             // Press 'C' while hovering to copy the center pixel's #HEX color and exit capture
             if let sampled = Self.samplePixelHexColor(cgImage: cgImage, viewHeight: bounds.height, scaleFactor: scaleFactor, viewPoint: mousePos) {
@@ -866,7 +1241,7 @@ final class PixPinSelectionView: NSView {
         )
     }
 
-    static func cropImage(cgImage: CGImage, viewHeight: CGFloat, scaleFactor: CGFloat, rect: NSRect) -> NSImage? {
+    static func cropCGImage(cgImage: CGImage, viewHeight: CGFloat, scaleFactor: CGFloat, rect: NSRect) -> CGImage? {
         let pixelX = rect.origin.x * scaleFactor
         let pixelY = (viewHeight - rect.origin.y - rect.height) * scaleFactor
         let pixelW = rect.width * scaleFactor
@@ -874,8 +1249,13 @@ final class PixPinSelectionView: NSView {
 
         let cropZone = CGRect(x: pixelX, y: pixelY, width: pixelW, height: pixelH)
             .intersection(CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
-        guard !cropZone.isEmpty, let subCG = cgImage.cropping(to: cropZone) else { return nil }
-        return NSImage(cgImage: subCG, size: NSSize(width: cropZone.width / scaleFactor, height: cropZone.height / scaleFactor))
+        guard !cropZone.isEmpty else { return nil }
+        return cgImage.cropping(to: cropZone)
+    }
+
+    static func cropImage(cgImage: CGImage, viewHeight: CGFloat, scaleFactor: CGFloat, rect: NSRect) -> NSImage? {
+        guard let subCG = cropCGImage(cgImage: cgImage, viewHeight: viewHeight, scaleFactor: scaleFactor, rect: rect) else { return nil }
+        return NSImage(cgImage: subCG, size: NSSize(width: CGFloat(subCG.width) / scaleFactor, height: CGFloat(subCG.height) / scaleFactor))
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -937,7 +1317,7 @@ final class PixPinSelectionView: NSView {
         }
         ctx.restoreGState()
 
-        let dimStr = "\(Int(sel.width)) × \(Int(sel.height))" as NSString
+        let dimStr = "\(Int(sel.width)) × \(Int(sel.height)) · \(L10n.captureSelectionScrollHint(defaultScrollMode: preferScrollingCapture))" as NSString
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold),
             .foregroundColor: NSColor.white

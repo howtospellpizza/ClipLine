@@ -45,6 +45,7 @@ macOS 原生截图、标注与顶部“晾衣绳”贴图工具。
 
 - **单击智能吸附窗口**：鼠标悬停在任意可见窗口（包括台前调度左侧缩略图）上会自动高亮识别边界，**直接单击**即可一键截取完整窗口。
 - **自由框选与一键截全屏**：按住鼠标拖拽截取自定义区域；进入截图模式后按 **`Space`（空格键）** 或 **`⌘A`** 即可直接截取整张屏幕。
+- **滚动截长图（`L` / `--scroll`）**：在截图模式下按 **`L`**（或点击任意贴图工具栏上的 **截长图** 图标、菜单栏 **滚动截长图 (`L`)**，或运行 `clipline --scroll`），上下滚动滚轮/触控板即可实时拼接长页面（自动去除来回滚动重复内容、保留顶部固定表头，并通过 `ScreenCaptureKit` 自动排除 ClipLine 自身窗口与圆点），按 **`Return`（`↩`）** 完成并固定为贴图。
 - **放大镜与 HEX 取色器**：悬停时实时显示坐标与 `8×` 像素放大镜，按 **`C`** 即可直接复制当前像素的 `#RRGGBB` 色值并退出截图；可在快捷键设置（`⌘,`）中切换准星样式（全屏十字线、四角取景框、极简圆点）与配色。
 - **原地贴图与边缘无损重裁**：截图完成后直接停留在所选屏幕坐标处。在移动窗口或选择标注工具前（`100%` 缩放比例下），拖拽四周的 8 个圆点或 4 条边，可基于原始全屏画面继续放大或缩小裁剪范围。
 
@@ -173,8 +174,11 @@ macOS 原生截图、标注与顶部“晾衣绳”贴图工具。
 ```bash
 git clone https://github.com/howtospellpizza/ClipLine.git
 cd ClipLine
+make setup-codesign    # 可选：生成本地自签名证书，使编译/更新后无需重复授予录屏权限
 make install-service   # 安装 ~/.local/bin/clipline 并注册 LaunchAgent 开机自启
 ```
+
+> **提示**：`make build` 会自动使用登录钥匙串中的可用代码签名证书（或通过 `make setup-codesign` 一键生成 `ClipLine Local Signer` 本地证书）为 `build/clipline` 签名，避免每次重新编译或 `clipline --update` 更新后 macOS 录屏权限失效。
 
 或者仅安装二进制文件而不注册开机自启：
 
@@ -212,7 +216,7 @@ nohup ~/.local/bin/clipline >"$HOME/Library/Logs/clipline.log" 2>&1 &
 - 如果已注册的 LaunchAgent 确实指向当前二进制文件，更新器会重启该任务，但不会新建 LaunchAgent。否则，只有检测到相同可执行文件路径的守护进程正在运行时，才会停止并重启该进程；新进程使用更新器当前的环境变量，无法恢复仅存在于旧进程中的环境变量。
 - 活动贴图尚未保存，守护进程重启时可能丢失。更新前请先保存重要内容。如果没有匹配的运行中守护进程或 LaunchAgent，更新器不会启动应用。
 
-`make install` 仅用于本地编译并复制：它会构建 `build/clipline`，再复制到 `~/.local/bin/clipline`。它不会对二进制文件签名、停止或重启守护进程，也不会注册或管理 LaunchAgent。也可以从本地仓库更新：
+`make install` 仅用于本地编译并复制：它会构建 `build/clipline`（当存在本地代码签名证书时自动签名，否则回退为 ad-hoc 签名），再复制到 `~/.local/bin/clipline`。它不会停止或重启守护进程，也不会注册或管理 LaunchAgent。也可以从本地仓库更新：
 
 ```bash
 cd /path/to/ClipLine
@@ -246,6 +250,7 @@ make uninstall
 
 ```bash
 ~/.local/bin/clipline --capture     # 启动框选截图
+~/.local/bin/clipline --scroll      # 启动滚动截长图（或 -l）
 ~/.local/bin/clipline --clipboard   # 将剪贴板中的图片（或纯文本便签卡片）贴到屏幕上
 ~/.local/bin/clipline --settings    # 打开快捷键设置（必要时启动守护进程）
 ~/.local/bin/clipline --shortcuts   # 以 JSON 输出当前全局快捷键
@@ -267,6 +272,7 @@ Carbon 独占注册只能检测其他使用独占 Carbon 注册的快捷键冲�
 | `⌘⇧X` | 全局 | 框选截图（备用快捷键） |
 | `⌃⌘V` | 全局 | 将剪贴板图片（或纯文本便签）贴到屏幕 |
 | `Space` / `⌘A` | 截图模式 | 一键截取全屏 |
+| `L` | 截图模式 | 对当前选区或悬停窗口启动滚动截长图 |
 | `C` | 截图模式 | 复制当前悬停像素的 `#RRGGBB` 色值并退出截图 |
 | `↩` (`Return`) | 贴图窗口 | 复制合成图片并关闭贴图 |
 | `⌘C` | 贴图窗口 | 复制合成图片（保留贴图窗口） |

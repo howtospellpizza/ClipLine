@@ -1236,6 +1236,67 @@ func runSuite4PinToolbarAndCanvasTests(_ t: TestHarness, testPasteboard: NSPaste
     }
 
     // Verify 4G: Esc key discards/closes both panels without writing to clipboard
+    // First verify toolbar hover tracking updates vm.hoveredToolbarTooltip immediately without waiting for macOS .help
+    let trackView = ToolbarHoverTrackingNSView(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
+    trackView.tooltipText = L10n.toolbarScrollingCaptureTooltip
+    trackView.vm = vm
+    if let enterEv = NSEvent.enterExitEvent(
+        with: .mouseEntered,
+        location: NSPoint(x: 12, y: 12),
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: tbPanel.windowNumber,
+        context: nil,
+        eventNumber: 1,
+        trackingNumber: 1,
+        userData: nil
+    ),
+       let exitEv = NSEvent.enterExitEvent(
+        with: .mouseExited,
+        location: NSPoint(x: 30, y: 30),
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: tbPanel.windowNumber,
+        context: nil,
+        eventNumber: 2,
+        trackingNumber: 1,
+        userData: nil
+       ) {
+        trackView.mouseEntered(with: enterEv)
+        let enteredMatches = (vm.hoveredToolbarTooltip == L10n.toolbarScrollingCaptureTooltip)
+        tbPanel.refreshToolbarRootView()
+        if let hosting = tbPanel.contentView {
+            hosting.layoutSubtreeIfNeeded()
+            if let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) {
+                hosting.cacheDisplay(in: hosting.bounds, to: rep)
+                let sy = CGFloat(rep.pixelsHigh) / max(1.0, hosting.bounds.height)
+                var darkTooltipPixels = 0
+                for y in 0..<rep.pixelsHigh {
+                    let logicalY = CGFloat(y) / sy
+                    // Bottom padding zone below the clipped toolbar capsule
+                    guard logicalY > 44 && logicalY < hosting.bounds.height else { continue }
+                    for x in 0..<rep.pixelsWide {
+                        guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                        if c.alphaComponent > 0.4 && max(c.redComponent, c.greenComponent, c.blueComponent) < 0.35 {
+                            darkTooltipPixels += 1
+                        }
+                    }
+                }
+                t.check(
+                    darkTooltipPixels > 100,
+                    "Hovered toolbar tooltip renders unclipped in bottom padding area",
+                    detail: "darkTooltipPixels=\(darkTooltipPixels)"
+                )
+            }
+        }
+        trackView.mouseExited(with: exitEv)
+        let exitedClears = (vm.hoveredToolbarTooltip == nil)
+        t.check(
+            enteredMatches && exitedClears,
+            "ToolbarHoverTrackingNSView immediately updates and clears vm.hoveredToolbarTooltip on mouseEntered/mouseExited"
+        )
+    }
+
     testPasteboard.clearContents()
     testPasteboard.setString("SENTINEL_CLIPBOARD_STRING", forType: .string)
     if let escEvent = NSEvent.keyEvent(

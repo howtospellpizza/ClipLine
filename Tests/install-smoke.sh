@@ -73,3 +73,37 @@ make uninstall HOME="$test_home" CLIPLINE_SKIP_LAUNCHCTL=1
 test ! -e "$test_home/Library/LaunchAgents/io.github.clipline.daemon.plist"
 make install HOME="$test_home"
 printf 'PASS: scoped uninstall, repeat uninstall, spaced paths, LaunchAgent plist, and reinstall. Artifacts: %s\n' "$root"
+
+# Verify ensure-codesign-cert.sh fail-closed behavior under isolated mock PATH/HOME without touching real keychain
+mock_bin="$root/mock-bin"
+mkdir -p "$mock_bin"
+cat > "$mock_bin/dscl" <<'MOCK'
+#!/bin/sh
+printf 'NFSHomeDirectory: %s\n' "$HOME"
+MOCK
+cat > "$mock_bin/security" <<'MOCK'
+#!/bin/sh
+printf '"/__clipline_smoke_missing_keychain__"\n'
+MOCK
+cat > "$mock_bin/defaults" <<'MOCK'
+#!/bin/sh
+if [ "$1" = "read" ]; then
+    printf '%s' "${CLIPLINE_MOCK_ANCHOR:-}"
+    exit 0
+fi
+exit 1
+MOCK
+chmod +x "$mock_bin/dscl" "$mock_bin/security" "$mock_bin/defaults"
+
+if env PATH="$mock_bin:$PATH" HOME="$test_home" CLIPLINE_MOCK_ANCHOR="" sh scripts/ensure-codesign-cert.sh --create >/dev/null 2>"$root/codesign_err.txt"; then
+    echo "FAIL: ensure-codesign-cert.sh --create should exit nonzero when default keychain is unavailable" >&2
+    exit 1
+fi
+case "$(cat "$root/codesign_err.txt")" in
+    *"Default login keychain is unavailable; cannot create"*) ;;
+    *) echo "FAIL: unexpected stderr for missing keychain --create: $(cat "$root/codesign_err.txt")" >&2; exit 1 ;;
+esac
+if env PATH="$mock_bin:$PATH" HOME="$test_home" CLIPLINE_MOCK_ANCHOR="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" sh scripts/ensure-codesign-cert.sh --print-identity >/dev/null 2>"$root/codesign_anchor_err.txt"; then
+    echo "FAIL: ensure-codesign-cert.sh --print-identity should exit nonzero when anchored identity has no keychain" >&2
+    exit 1
+fi

@@ -2,9 +2,12 @@ import AppKit
 import Foundation
 
 #if CLIPLINE_TEST
-MainActor.assumeIsolated {
-    exit(runAllTests())
+// Keep synchronous AppKit regressions outside NSApp.run's event/animation lifecycle.
+let finishTests = MainActor.assumeIsolated { runAllTests() }
+Task { @MainActor in
+    exit(await finishTests())
 }
+NSApplication.shared.run()
 #else
 @MainActor
 private final class SettingsRequestAcknowledgement {
@@ -96,6 +99,7 @@ if args.count >= 2 {
         Usage: clipline [options]
           (no args)        Start ClipLine background daemon (or trigger capture if already running)
           -i, --capture    Trigger interactive region capture + Pin on screen
+          -l, --scroll     Trigger interactive scrolling long capture on screen
           -c, --clipboard  Pin current clipboard image or text card on screen
           --settings       Open keyboard shortcut settings (starts the daemon if needed)
           --shortcuts      Print current global shortcuts as JSON
@@ -148,6 +152,17 @@ if args.count >= 2 {
                 NSNotification.Name(channel),
                 object: nil,
                 userInfo: ["mode": "interactive"],
+                deliverImmediately: true
+            )
+        }
+        CFRunLoopRunInMode(.defaultMode, 0.05, false)
+        exit(0)
+    } else if arg == "-l" || arg == "--scroll" {
+        for channel in NotificationChannels.captureChannels {
+            DistributedNotificationCenter.default().postNotificationName(
+                NSNotification.Name(channel),
+                object: nil,
+                userInfo: ["mode": "scroll"],
                 deliverImmediately: true
             )
         }
